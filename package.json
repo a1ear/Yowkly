@@ -1,0 +1,52 @@
+{
+  "name": "yowkly",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "node --test \"tests/**/*.test.mjs\"",
+    "test:db": "node --test \"tests/db/*.test.mjs\"",
+    "test:worker": "node --test \"tests/worker/*.test.mjs\"",
+    "db:start": "supabase start",
+    "db:stop": "supabase stop",
+    "db:reset": "supabase db reset",
+    "db:types": "supabase gen types typescript --local > src/lib/database.types.ts",
+    "seed:storage": "node --env-file=.env.local scripts/seed-storage.mjs",
+    "worker": "node --env-file=.env.local worker/scan.mjs",
+    "check": "npm run lint && npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.117.2",
+    "@upstash/ratelimit": "^2.2.0",
+    "@upstash/redis": "^1.39.0",
+    "next": "16.3.6",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "server-only": "^0.0.1",
+    "tus-js-client": "^4.3.1",
+    "yauzl": "^3.4.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/yauzl": "^3.4.0",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.6",
+    "supabase": "^2.118.0",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "yazl": "^3.3.1"
+  },
+  "engines": {
+    "node": ">=20.9"
+  }
+}

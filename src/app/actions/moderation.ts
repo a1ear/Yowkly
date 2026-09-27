@@ -1,0 +1,36 @@
+'use server';
+import { revalidateTag } from 'next/cache';
+import { z } from 'zod';
+import { authed, fail, toUserError, type ActionResult } from '@/lib/actions';
+import { templateTag } from '@/lib/data/template';
+
+// Each call re-checks the moderator role inside Postgres (moderate_template / resolve_report).
+export async function moderateTemplate(templateId: string, action: 'approve' | 'reject' | 'remove' | 'restore', reason: string): Promise<ActionResult> {
+  const parsed = z.object({ id: z.uuid(), action: z.enum(['approve', 'reject', 'remove', 'restore']), reason: z.string().trim().max(1000) })
+    .safeParse({ id: templateId, action, reason });
+  if (!parsed.success) return fail('Invalid request.');
+  const a = await authed('write');
+  if ('error' in a) return a.error;
+  const { error } = await a.db.rpc('moderate_template', { p_template: templateId, p_action: action, p_reason: reason || null });
+  if (error) return fail(toUserError(error));
+  revalidateTag('templates', 'max');
+  revalidateTag(templateTag(templateId), 'max');
+  return { ok: true, data: null };
+}
+
+export async function resolveReport(reportId: string, status: 'resolved' | 'dismissed', note: string): Promise<ActionResult> {
+  if (!z.uuid().safeParse(reportId).success) return fail('Invalid report.');
+  const a = await authed('write');
+  if ('error' in a) return a.error;
+  const { error } = await a.db.rpc('resolve_report', { p_report: reportId, p_status: status, p_note: note.trim().slice(0, 1000) || null });
+  if (error) return fail(toUserError(error));
+  return { ok: true, data: null };
+}
+
+export async function markNotificationsRead(): Promise<ActionResult> {
+  const a = await authed('write');
+  if ('error' in a) return a.error;
+  const { error } = await a.db.rpc('mark_notifications_read', { p_ids: null });
+  if (error) return fail(toUserError(error));
+  return { ok: true, data: null };
+}

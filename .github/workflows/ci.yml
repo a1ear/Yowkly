@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Lint, types, unit + security tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
+      # PGlite-backed RLS/attack tests + scan-worker checks (no Docker needed).
+      - run: npm test
+
+  supabase:
+    name: Real Supabase stack + production build
+    runs-on: ubuntu-latest
+    needs: checks
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - name: Start Supabase (applies every migration and the seed)
+        run: npx supabase start -x studio,imgproxy,edge-runtime,logflare,vector
+      - name: Lint the database schema
+        run: npx supabase db lint --level error
+      - name: Export local keys
+        run: |
+          npx supabase status -o env > supabase.env
+          echo "NEXT_PUBLIC_SUPABASE_URL=$(grep '^API_URL=' supabase.env | cut -d= -f2- | tr -d '\"')" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$(grep '^ANON_KEY=' supabase.env | cut -d= -f2- | tr -d '\"')" >> $GITHUB_ENV
+          echo "SUPABASE_SERVICE_ROLE_KEY=$(grep '^SERVICE_ROLE_KEY=' supabase.env | cut -d= -f2- | tr -d '\"')" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_SITE_URL=http://localhost:3000" >> $GITHUB_ENV
+      - name: Production build against the real database
+        run: npm run build
