@@ -2,15 +2,14 @@
 import Link from 'next/link';
 import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { browserClient } from '@/lib/supabase/browser';
-import { registerMedia, removeMedia, updateMediaAlt } from '@/app/actions/upload';
+import { registerMedia, removeMedia, startMediaUpload, updateMediaAlt } from '@/app/actions/upload';
+import { putWithProgress } from '@/lib/upload-client';
 import { useToast } from '../toast';
 import { Icon } from '../icons';
 import { mediaUrl } from '@/lib/labels';
 import type { DraftMedia } from '@/lib/data/draft';
 
 const TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/avif', 'image/gif'];
-const EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/avif': 'avif', 'image/gif': 'gif' };
 
 async function dimensions(file: File) {
   const bmp = await createImageBitmap(file);
@@ -19,7 +18,7 @@ async function dimensions(file: File) {
   return d;
 }
 
-export function MediaStep({ templateId, uid, media, isMobile }: { templateId: string; uid: string; media: DraftMedia[]; isMobile: boolean }) {
+export function MediaStep({ templateId, media, isMobile }: { templateId: string; media: DraftMedia[]; isMobile: boolean }) {
   const cover = media.find((m) => m.kind === 'cover');
   const rest = media.filter((m) => m.kind !== 'cover');
   return (
@@ -30,7 +29,7 @@ export function MediaStep({ templateId, uid, media, isMobile }: { templateId: st
           <p className="m-0 text-[13px] text-ink-2">Shown on cards and at the top of your page. 1600×1000 or larger works best. PNG, JPG, WebP, AVIF or GIF up to 10 MB.</p>
         </div>
         {cover ? <MediaItem m={cover} /> : null}
-        <AddImage templateId={templateId} uid={uid} kind="cover" label={cover ? 'Replace cover' : 'Add cover'} />
+        <AddImage templateId={templateId} kind="cover" label={cover ? 'Replace cover' : 'Add cover'} />
       </section>
 
       <section className="flex flex-col gap-4">
@@ -39,7 +38,7 @@ export function MediaStep({ templateId, uid, media, isMobile }: { templateId: st
           <p className="m-0 text-[13px] text-ink-2">Up to 11 more images. {isMobile ? 'Screens are shown in phone frames.' : 'Show key pages and states.'}</p>
         </div>
         {rest.length > 0 && <ul className="m-0 grid list-none gap-3 p-0 sm:grid-cols-2">{rest.map((m) => <li key={m.id}><MediaItem m={m} /></li>)}</ul>}
-        {media.length < 12 && <AddImage templateId={templateId} uid={uid} kind={isMobile ? 'mobile_screen' : 'gallery'} label={isMobile ? 'Add a screen' : 'Add an image'} />}
+        {media.length < 12 && <AddImage templateId={templateId} kind={isMobile ? 'mobile_screen' : 'gallery'} label={isMobile ? 'Add a screen' : 'Add an image'} />}
       </section>
 
       <div className="sticky bottom-16 flex justify-between gap-2 border-t border-line bg-canvas/95 py-4 md:bottom-0">
@@ -50,7 +49,7 @@ export function MediaStep({ templateId, uid, media, isMobile }: { templateId: st
   );
 }
 
-function AddImage({ templateId, uid, kind, label }: { templateId: string; uid: string; kind: 'cover' | 'gallery' | 'mobile_screen'; label: string }) {
+function AddImage({ templateId, kind, label }: { templateId: string; kind: 'cover' | 'gallery' | 'mobile_screen'; label: string }) {
   const toast = useToast();
   const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
@@ -71,15 +70,15 @@ function AddImage({ templateId, uid, kind, label }: { templateId: string; uid: s
     if (!file) return;
     if (alt.trim().length < 3) return toast({ text: 'Describe the image in a few words (alt text).', tone: 'error' });
     const { width, height } = await dimensions(file);
-    const path = `${uid}/${templateId}/${crypto.randomUUID()}.${EXT[file.type]}`;
-    const db = browserClient();
-    const up = await db.storage.from('media').upload(path, file, { contentType: file.type, upsert: false });
-    if (up.error) return toast({ text: 'Upload failed. Try again.', tone: 'error' });
-    const r = await registerMedia({ templateId, path, kind, device: kind === 'mobile_screen' ? 'mobile' : 'desktop', alt, width, height });
-    if (!r.ok) {
-      await db.storage.from('media').remove([path]);
-      return toast({ text: r.error, tone: 'error' });
+    const start = await startMediaUpload(templateId, file.type, file.size);
+    if (!start.ok) return toast({ text: start.error, tone: 'error' });
+    try {
+      await putWithProgress(start.data.url, file, file.type, () => {}).done;
+    } catch {
+      return toast({ text: 'Upload failed. Try again.', tone: 'error' });
     }
+    const r = await registerMedia({ templateId, path: start.data.path, kind, device: kind === 'mobile_screen' ? 'mobile' : 'desktop', alt, width, height });
+    if (!r.ok) return toast({ text: r.error, tone: 'error' });
     setFile(null); setPreview(null); setAlt('');
     router.refresh();
   });

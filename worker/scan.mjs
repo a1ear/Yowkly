@@ -1,9 +1,11 @@
 // Yowkly scan worker.
 // Claims queued uploads, checks them, and promotes clean files from the private
-// `quarantine` bucket to the private `template-files` bucket. Nothing is
-// downloadable until this worker marks it clean.
+// R2 quarantine bucket to the private R2 files bucket. Nothing is downloadable
+// until this worker marks it clean. Rejected files are deleted from quarantine.
 //
-//   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY   required
+//   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY   required (claim/complete RPCs are service-only)
+//   R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY   required
+//   R2_BUCKET_QUARANTINE, R2_BUCKET_FILES     default yowkly-quarantine / yowkly-files
 //   CLAMD_HOST, CLAMD_PORT (3310)             required in production
 //   ALLOW_NO_ANTIVIRUS=1                      local dev only: structural checks without ClamAV
 //
@@ -12,12 +14,13 @@
 import { createClient } from '@supabase/supabase-js';
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdtemp, open, rm, stat } from 'node:fs/promises';
+import { mkdtemp, open, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import net from 'node:net';
+import { AwsClient } from 'aws4fetch';
 import { inspectZip, magicOk, ZIP_BASED } from './checks.mjs';
 
 const env = process.env;
@@ -31,6 +34,12 @@ if (!antivirus && (production || env.ALLOW_NO_ANTIVIRUS !== '1')) {
 if (!antivirus) console.warn('[scan] WARNING: running WITHOUT ClamAV (local dev). Structural checks only.');
 
 const db = createClient(url, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
+
+if (!env.R2_ACCOUNT_ID || !env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY) throw new Error('R2_ACCOUNT_ID, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY are required');
+const r2 = new AwsClient({ accessKeyId: env.R2_ACCESS_KEY_ID, secretAccessKey: env.R2_SECRET_ACCESS_KEY, service: 's3', region: 'auto' });
+const BUCKET = { quarantine: env.R2_BUCKET_QUARANTINE || 'yowkly-quarantine', files: env.R2_BUCKET_FILES || 'yowkly-files' };
+const r2url = (bucket, key) => `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${bucket}/${key}`;
+const removeFromQuarantine = (key) => r2.fetch(r2url(BUCKET.quarantine, key), { method: 'DELETE' }).catch(() => {});
 
 /** clamd INSTREAM: <len:uint32be><bytes>... <0:uint32be>. clamd.conf must allow StreamMaxLength >= 210M. */
 function clamScan(file) {
@@ -71,19 +80,24 @@ async function processJob(job) {
   const dir = await mkdtemp(join(tmpdir(), 'scan-'));
   const file = join(dir, 'upload');
   const report = { antivirus: antivirus ? 'clamav' : 'skipped (dev)', checks: [] };
-  const finish = (status, extra = {}) => db.rpc('complete_scan', {
-    p_file: job.id, p_status: status, p_new_path: extra.path ?? null, p_sha256: extra.sha ?? null,
-    p_manifest: extra.manifest ?? null, p_report: { ...report, ms: Date.now() - started }, p_reject_reason: extra.reason ?? null,
-  });
+  const finish = async (status, extra = {}) => {
+    const r = await db.rpc('complete_scan', {
+      p_file: job.id, p_status: status, p_new_path: extra.path ?? null, p_sha256: extra.sha ?? null,
+      p_manifest: extra.manifest ?? null, p_report: { ...report, ms: Date.now() - started }, p_reject_reason: extra.reason ?? null,
+    });
+    // Rejected or infected bytes never stay around.
+    if (status !== 'clean' && !r.error) await removeFromQuarantine(job.storage_path);
+    return r;
+  };
   try {
-    const signed = await db.storage.from('quarantine').createSignedUrl(job.storage_path, 300);
-    if (signed.error) throw new Error(`sign: ${signed.error.message}`);
-    const res = await fetch(signed.data.signedUrl);
+    const res = await r2.fetch(r2url(BUCKET.quarantine, job.storage_path));
+    if (res.status === 404) return finish('rejected', { reason: 'The upload never finished. Upload the file again.' });
     if (!res.ok || !res.body) throw new Error(`download: HTTP ${res.status}`);
     await pipeline(Readable.fromWeb(res.body), createWriteStream(file));
 
+    // The upload URL was signed for exactly this size; anything else is tampering or a broken upload.
     const { size } = await stat(file);
-    if (size !== Number(job.size_bytes)) throw new Error(`size mismatch ${size} vs ${job.size_bytes}`);
+    if (size !== Number(job.size_bytes)) return finish('rejected', { reason: 'The uploaded file size did not match. Upload it again.' });
 
     const fh = await open(file, 'r');
     const head = Buffer.alloc(16);
@@ -114,11 +128,19 @@ async function processJob(job) {
     const owner = job.storage_path.split('/')[0];
     const [, tpl, ver] = job.storage_path.split('/');
     const dest = `${owner}/${tpl}/${ver}/${job.id}-${safeName(job.original_name)}`;
-    const copy = await db.storage.from('quarantine').copy(job.storage_path, dest, { destinationBucket: 'template-files' });
-    if (copy.error) throw new Error(`promote: ${copy.error.message}`);
+    // Server-side copy within the R2 account; fall back to re-uploading the bytes we already hold.
+    let copied = await r2.fetch(r2url(BUCKET.files, dest), {
+      method: 'PUT', headers: { 'x-amz-copy-source': `/${BUCKET.quarantine}/${job.storage_path}` },
+    });
+    if (!copied.ok) {
+      copied = await r2.fetch(r2url(BUCKET.files, dest), {
+        method: 'PUT', body: await readFile(file), headers: { 'content-type': 'application/octet-stream' },
+      });
+    }
+    if (!copied.ok) throw new Error(`promote: HTTP ${copied.status}`);
     const done = await finish('clean', { path: dest, sha, manifest });
     if (done.error) throw new Error(`complete: ${done.error.message}`);
-    await db.storage.from('quarantine').remove([job.storage_path]);
+    await removeFromQuarantine(job.storage_path);
     console.log(`[scan] clean ${job.id} ${job.original_name} (${Date.now() - started} ms)`);
   } finally {
     await rm(dir, { recursive: true, force: true });

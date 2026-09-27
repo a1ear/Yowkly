@@ -1,9 +1,9 @@
 'use client';
 import Link from 'next/link';
 import { useActionState, useCallback, useEffect, useRef, useState } from 'react';
-import * as tus from 'tus-js-client';
 import { browserClient } from '@/lib/supabase/browser';
-import { registerUpload, removeFile, saveLinks } from '@/app/actions/upload';
+import { registerUpload, removeFile, saveLinks, startFileUpload } from '@/app/actions/upload';
+import { putWithProgress } from '@/lib/upload-client';
 import { useToast } from '../toast';
 import { Icon } from '../icons';
 import { formatBytes } from '@/lib/format';
@@ -16,7 +16,7 @@ const MAX_FILES = 5;
 
 type Row =
   | { kind: 'saved'; file: DraftFile }
-  | { kind: 'uploading'; key: string; name: string; size: number; sent: number; paused: boolean; upload: tus.Upload }
+  | { kind: 'uploading'; key: string; name: string; size: number; sent: number; abort: () => void }
   | { kind: 'failed'; key: string; name: string; size: number; error: string };
 
 const LINK_FIELDS: [LinkKind, string, string][] = [
@@ -28,8 +28,8 @@ const LINK_FIELDS: [LinkKind, string, string][] = [
   ['penpot', 'Penpot', 'https://design.penpot.app/…'],
 ];
 
-export function SourceStep({ templateId, versionId, uid, files, links, demoUrl }: {
-  templateId: string; versionId: string; uid: string; files: DraftFile[];
+export function SourceStep({ templateId, versionId, files, links, demoUrl }: {
+  templateId: string; versionId: string; files: DraftFile[];
   links: { kind: LinkKind; url: string }[]; demoUrl: string | null;
 }) {
   const toast = useToast();
@@ -56,44 +56,44 @@ export function SourceStep({ templateId, versionId, uid, files, links, demoUrl }
 
   async function add(list: FileList | null) {
     if (!list) return;
-    const { data: { session } } = await browserClient().auth.getSession();
-    if (!session) return toast({ text: 'Your session expired. Sign in again.', tone: 'error' });
     let count = rows.filter((r) => r.kind !== 'failed').length;
     for (const file of Array.from(list)) {
       const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
       const key = crypto.randomUUID();
-      const fail = (error: string) => setRows((all) => [...all, { kind: 'failed', key, name: file.name, size: file.size, error }]);
+      const failRow = (error: string) => ({ kind: 'failed' as const, key, name: file.name, size: file.size, error });
+      const fail = (error: string) => setRows((all) => [...all, failRow(error)]);
+      // Friendly early checks; Postgres enforces the same rules in prepare_file_upload.
       if (!EXTS.includes(ext)) { fail(`.${ext} files aren't supported. Use ${EXTS.map((e) => '.' + e).join(' ')}.`); continue; }
       if (file.size > MAX_BYTES) { fail('Files can be up to 200 MB.'); continue; }
       if (count >= MAX_FILES) { fail('A version can have at most 5 files.'); continue; }
       count++;
-      const path = `${uid}/${templateId}/${versionId}/${key}.${ext}`;
-      const upload = new tus.Upload(file, {
-        endpoint: `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/upload/resumable`,
-        retryDelays: [0, 3000, 5000, 10000, 20000],
-        headers: { authorization: `Bearer ${session.access_token}`, apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, 'x-upsert': 'false' },
-        uploadDataDuringCreation: true,
-        removeFingerprintOnSuccess: true,
-        chunkSize: 6 * 1024 * 1024, // Supabase requires 6 MB chunks
-        metadata: { bucketName: 'quarantine', objectName: path, contentType: file.type || 'application/octet-stream', cacheControl: '3600' },
-        onProgress: (sent) => patch(key, (r) => (r.kind === 'uploading' ? { ...r, sent } : r)),
-        onError: () => patch(key, () => ({ kind: 'failed', key, name: file.name, size: file.size, error: 'Upload failed. Check your connection and try again.' })),
-        onSuccess: async () => {
-          const res = await registerUpload(versionId, path, file.name);
-          if (!res.ok) return patch(key, () => ({ kind: 'failed', key, name: file.name, size: file.size, error: res.error }));
-          patch(key, () => ({
-            kind: 'saved',
-            file: { id: res.data.id, original_name: file.name, ext, size_bytes: file.size, source_tool: 'code', scan_status: 'pending', reject_reason: null, created_at: new Date().toISOString() },
-          }));
-        },
-      });
-      setRows((all) => [...all, { kind: 'uploading', key, name: file.name, size: file.size, sent: 0, paused: false, upload }]);
-      upload.findPreviousUploads().then((prev) => { if (prev.length) upload.resumeFromPreviousUpload(prev[0]); upload.start(); });
+      upload(file, ext, key, failRow);
     }
   }
 
+  async function upload(file: File, ext: string, key: string, failRow: (e: string) => Row) {
+    setRows((all) => [...all, { kind: 'uploading', key, name: file.name, size: file.size, sent: 0, abort: () => {} }]);
+    const start = await startFileUpload(versionId, file.name, file.size);
+    if (!start.ok) return patch(key, () => failRow(start.error));
+    const put = putWithProgress(start.data.url, file, 'application/octet-stream',
+      (sent) => patch(key, (r) => (r.kind === 'uploading' ? { ...r, sent } : r)));
+    patch(key, (r) => (r.kind === 'uploading' ? { ...r, abort: put.abort } : r));
+    try {
+      await put.done;
+    } catch (e) {
+      if ((e as Error).message === 'aborted') return;
+      return patch(key, () => failRow((e as Error).message));
+    }
+    const res = await registerUpload(versionId, start.data.path, file.name, file.size);
+    if (!res.ok) return patch(key, () => failRow(res.error));
+    patch(key, () => ({
+      kind: 'saved',
+      file: { id: res.data.id, original_name: file.name, ext, size_bytes: file.size, source_tool: 'code', scan_status: 'pending', reject_reason: null, created_at: new Date().toISOString() },
+    }));
+  }
+
   const remove = async (r: Row) => {
-    if (r.kind === 'uploading') { await r.upload.abort(true); setRows((all) => all.filter((x) => x !== r)); return; }
+    if (r.kind === 'uploading') { r.abort(); setRows((all) => all.filter((x) => x !== r)); return; }
     if (r.kind === 'failed') { setRows((all) => all.filter((x) => x !== r)); return; }
     const res = await removeFile(r.file.id);
     if (!res.ok) return toast({ text: res.error, tone: 'error' });
@@ -137,12 +137,6 @@ export function SourceStep({ templateId, versionId, uid, files, links, demoUrl }
                     <span className="min-w-0 flex-1 truncate font-mono text-[13px]">{name}</span>
                     <span className="font-mono text-[12px] text-ink-3">{formatBytes(size)}</span>
                     <FileStatus row={r} />
-                    {r.kind === 'uploading' && (
-                      <button type="button" aria-label={r.paused ? 'Resume upload' : 'Pause upload'} className="btn btn-ghost h-9 w-9 px-0"
-                              onClick={() => { if (r.paused) r.upload.start(); else r.upload.abort(); patch(r.key, (x) => (x.kind === 'uploading' ? { ...x, paused: !x.paused } : x)); }}>
-                        <Icon name={r.paused ? 'refresh' : 'pause'} size={15} />
-                      </button>
-                    )}
                     <button type="button" aria-label={`Remove ${name}`} onClick={() => remove(r)} className="btn btn-ghost h-9 w-9 px-0"><Icon name="x" size={15} /></button>
                   </div>
                   {r.kind === 'uploading' && (
@@ -196,7 +190,7 @@ export function SourceStep({ templateId, versionId, uid, files, links, demoUrl }
 function FileStatus({ row }: { row: Row }) {
   if (row.kind === 'uploading') {
     const pct = Math.round((row.sent / row.size) * 100);
-    return <span className="font-mono text-[12px] text-ink-2">{row.paused ? 'Paused' : `${pct}%`}</span>;
+    return <span className="font-mono text-[12px] text-ink-2">{pct}%</span>;
   }
   if (row.kind === 'failed') return <Pill tone="danger" icon="x" label="Failed" />;
   switch (row.file.scan_status) {

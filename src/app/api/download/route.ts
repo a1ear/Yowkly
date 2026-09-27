@@ -1,14 +1,14 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { authed, toUserError } from '@/lib/actions';
-import { adminClient } from '@/lib/supabase/admin';
+import { presignDownload, type LogicalBucket } from '@/lib/r2';
 
 const body = z.object({ fileId: z.uuid(), acceptLicense: z.boolean().default(false) });
 
 /**
  * 1. Postgres decides (begin_download): signed in, file clean, version not yanked,
  *    license accepted, daily cap, and records the download with a license snapshot.
- * 2. Only then does the service key sign a 60-second URL for that exact path.
+ * 2. Only then does the server sign a 60-second R2 URL for that exact path.
  */
 export async function POST(request: Request) {
   const parsed = body.safeParse(await request.json().catch(() => null));
@@ -33,10 +33,12 @@ export async function POST(request: Request) {
   }
 
   const row = (data as { bucket: string; storage_path: string; filename: string }[])[0];
-  const signed = await adminClient().storage.from(row.bucket).createSignedUrl(row.storage_path, 60, { download: row.filename });
-  if (signed.error || !signed.data) {
-    console.error('[download] sign failed', signed.error?.message);
+  let url: string;
+  try {
+    url = await presignDownload(row.bucket as LogicalBucket, row.storage_path, row.filename, 60);
+  } catch (e) {
+    console.error('[download] sign failed', (e as Error).message);
     return NextResponse.json({ error: 'The file could not be prepared. Try again in a minute.' }, { status: 502 });
   }
-  return NextResponse.json({ url: signed.data.signedUrl, filename: row.filename }, { headers: { 'Cache-Control': 'no-store' } });
+  return NextResponse.json({ url, filename: row.filename }, { headers: { 'Cache-Control': 'no-store' } });
 }

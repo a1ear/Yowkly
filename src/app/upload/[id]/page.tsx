@@ -92,8 +92,8 @@ export default async function UploadStepPage(props: PageProps<'/upload/[id]'>) {
               initial={{ title: t.title, tagline: t.tagline ?? '', description: t.description ?? '', categoryId: t.category_id, tagIds: d.tagIds }} />
           )}
           {needsVersion && <NewVersion templateId={t.id} latest={d.latestPublished?.version ?? null} step={step} />}
-          {step === 2 && draft && <SourceStep templateId={t.id} versionId={draft.id} uid={d.uid} files={d.files} links={d.links} demoUrl={t.demo_url} />}
-          {step === 3 && <MediaStep templateId={t.id} uid={d.uid} media={d.media} isMobile={isMobile} />}
+          {step === 2 && draft && <SourceStep templateId={t.id} versionId={draft.id} files={d.files} links={d.links} demoUrl={t.demo_url} />}
+          {step === 3 && <MediaStep templateId={t.id} media={d.media} isMobile={isMobile} />}
           {step === 4 && draft && (
             <LicenseForm templateId={t.id} versionId={draft.id} licenses={licenses} previous={d.latestPublished?.version ?? null}
               initial={{ license: draft.license_code, version: draft.version, changelog: draft.changelog }} />

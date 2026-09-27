@@ -2,6 +2,9 @@ import type { NextConfig } from 'next';
 
 const supabase = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'http://127.0.0.1:54321';
 const supabaseWs = supabase.replace(/^http/, 'ws');
+const media = process.env.NEXT_PUBLIC_MEDIA_URL ? new URL(process.env.NEXT_PUBLIC_MEDIA_URL).origin : '';
+// Browsers PUT uploads straight to R2 with pre-signed URLs.
+const r2 = process.env.R2_ACCOUNT_ID ? `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com` : 'https://*.r2.cloudflarestorage.com';
 const dev = process.env.NODE_ENV !== 'production';
 
 // Inline scripts are required by Next's hydration unless every page is rendered
@@ -11,9 +14,9 @@ const csp = [
   "default-src 'self'",
   `script-src 'self' 'unsafe-inline'${dev ? " 'unsafe-eval'" : ''}`,
   "style-src 'self' 'unsafe-inline'",
-  `img-src 'self' data: blob: ${supabase}`,
+  `img-src 'self' data: blob: ${supabase} ${media}`,
   "font-src 'self'",
-  `connect-src 'self' ${supabase} ${supabaseWs}`,
+  `connect-src 'self' ${supabase} ${supabaseWs} ${r2}`,
   "frame-src https:",          // live demo previews (sandboxed iframes)
   "frame-ancestors 'none'",
   "object-src 'none'",

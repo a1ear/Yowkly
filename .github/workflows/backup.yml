@@ -1,0 +1,40 @@
+name: Nightly database backup
+
+# Supabase Free has no backups, so this dumps the database to a private R2 bucket
+# every night. Needs these repository secrets (Settings → Secrets → Actions):
+#   SUPABASE_DB_URL      the "Session pooler" connection string (the direct one is
+#                        IPv6-only on the free plan and GitHub runners can't reach it)
+#   R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
+#   R2_BUCKET_BACKUPS    e.g. yowkly-backups (add a 30-day lifecycle rule in R2)
+
+on:
+  schedule:
+    - cron: '0 18 * * *'   # 02:00 in the Philippines
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Dump the database (pg_dump 17 matches Supabase's Postgres)
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          file="yowkly-$(date -u +%Y-%m-%dT%H%MZ).dump"
+          docker run --rm -e PGURL="$SUPABASE_DB_URL" -v "$PWD:/out" postgres:17 \
+            sh -c 'pg_dump "$PGURL" --format=custom --no-owner --no-privileges \
+                    --schema=public --schema=auth --file="/out/'"$file"'"'
+          test -s "$file"
+          echo "FILE=$file" >> "$GITHUB_ENV"
+          ls -lh "$file"
+
+      - name: Upload to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          aws s3 cp "$FILE" "s3://${{ secrets.R2_BUCKET_BACKUPS }}/db/$FILE" \
+            --endpoint-url "https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"

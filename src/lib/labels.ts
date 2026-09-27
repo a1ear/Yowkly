@@ -27,7 +27,9 @@ export function awardLabel(a: Award) {
   return `${subject} of the Month · ${formatMonth(a.period_start)}`;
 }
 
+/** Template images live in the public R2 media bucket; avatars (small) stay in Supabase Storage. */
 export function mediaUrl(path: string, bucket: 'media' | 'avatars' = 'media') {
+  if (bucket === 'media') return `${publicEnv.NEXT_PUBLIC_MEDIA_URL.replace(/\/$/, '')}/${path}`;
   return `${publicEnv.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}`;
 }
 

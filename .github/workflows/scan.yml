@@ -1,0 +1,42 @@
+name: Scan uploads
+
+# Free way to run the scan worker: every 30 minutes, start ClamAV, drain the
+# upload queue once, and stop. Uploads wait up to ~30 min before going live.
+# Public repos get unlimited Actions minutes; a private repo uses about
+# 3 min per run (≈4,300 min/month), which is over the 2,000 free minutes, so
+# for a private repo use an always-on free VM instead (docs/OPERATIONS.md §2).
+# Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, R2_ACCOUNT_ID,
+#          R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_QUARANTINE, R2_BUCKET_FILES
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the worker image (ClamAV + Node)
+        run: docker build -f worker/Dockerfile -t yowkly-scan .
+      - name: Scan the queue once
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_QUARANTINE: ${{ secrets.R2_BUCKET_QUARANTINE }}
+          R2_BUCKET_FILES: ${{ secrets.R2_BUCKET_FILES }}
+        run: |
+          docker run --rm \
+            -e SUPABASE_URL -e SUPABASE_SERVICE_ROLE_KEY \
+            -e R2_ACCOUNT_ID -e R2_ACCESS_KEY_ID -e R2_SECRET_ACCESS_KEY \
+            -e R2_BUCKET_QUARANTINE -e R2_BUCKET_FILES \
+            yowkly-scan sh -c 'freshclam --stdout && clamd && node worker/scan.mjs --once'

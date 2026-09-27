@@ -8,7 +8,7 @@ A community showcase where developers and designers publish web templates, mobil
 
 ## Stack
 
-Next.js 16 (App Router) · Supabase (Postgres, Auth, Storage, pg_cron) · Tailwind 4 · Upstash rate limiting · ClamAV scan worker.
+Next.js 16 (App Router) · Supabase Free (Postgres, Auth, pg_cron) · Cloudflare R2 for uploaded files · Tailwind 4 · Upstash rate limiting · ClamAV scan worker. Runs entirely on free tiers (see [docs/OPERATIONS.md](docs/OPERATIONS.md)).
 
 ## Local setup
 
@@ -19,7 +19,7 @@ npm install
 npm run db:start          # starts local Supabase and applies migrations + seed
 npx supabase status       # copy API URL, anon key and service_role key
 cp .env.example .env.local  # paste the values in
-npm run seed:storage      # placeholder bytes for the demo downloads
+npm run seed:storage      # placeholder bytes for demo downloads (needs an R2 dev bucket, see .env.example)
 npm run dev               # http://localhost:3000
 ```
 
@@ -59,4 +59,4 @@ tests/worker/          hostile archives: zip bombs, traversal, symlinks, executa
 
 ## Security model in one paragraph
 
-The browser is never trusted. Every write goes through a server action that validates input and rate-limits, then calls Supabase **with the user's own JWT**, so Postgres Row Level Security makes the final decision. State changes (publish, moderate, download) are database functions with their own checks. The service-role key is used for exactly two things: signing 60-second download URLs for paths the database already authorised, and the scan worker. Uploaded files are unreachable until the worker marks them clean.
+The browser is never trusted. Every write goes through a server action that validates input and rate-limits, then calls Supabase **with the user's own JWT**, so Postgres Row Level Security makes the final decision. State changes (publish, moderate, download) are database functions with their own checks. The web app never holds the Supabase service-role key; only the scan worker does. Uploads go straight from the browser to Cloudflare R2 through links the server signs only after Postgres has approved the path, size and type. Downloads are 60-second signed R2 links for files the database has authorised. Uploaded files are unreachable until the worker marks them clean.

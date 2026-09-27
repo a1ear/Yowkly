@@ -23,13 +23,6 @@ const none = (res, msg = 'expected zero rows') => {
 };
 const sql = (q, p) => db.query(q, p).then((r) => r.rows);
 
-// Simulates the Storage API writing an object on the user's behalf (RLS applies).
-// No RETURNING: that would also require a SELECT policy, and quarantine has none on purpose.
-const upload = (uid, bucket, path, size = 1000) =>
-  as(db, uid, `insert into storage.objects (bucket_id, name, owner_id, metadata)
-               values ($1, $2, $3, jsonb_build_object('size', $4::bigint))`,
-     [bucket, path, uid, size]);
-
 before(async () => {
   db = await createDb();
   u.alice = await createUser(db, { email: 'alice@test.dev', meta: { user_name: 'alice' } }); // creator
@@ -104,32 +97,50 @@ test('create draft; others cannot see or edit it', async () => {
   fails(await as(db, u.alice, `update public.templates set owner_id = $2 where id = $1`, [s.tpl, u.bob]), /permission denied/);
 });
 
-test('storage: uploads only into your own draft version path', async () => {
-  const good = `${u.alice}/${s.tpl}/${s.ver}/11111111-1111-4111-8111-111111111111.zip`;
-  ok(await upload(u.alice, 'quarantine', good, 5_000_000));
-  s.zipPath = good;
-  fails(await upload(u.bob, 'quarantine', `${u.bob}/${s.tpl}/${s.ver}/22222222-2222-4222-8222-222222222222.zip`),
-        /row-level security/, 'bob into alice template');
-  fails(await upload(u.bob, 'quarantine', `${u.alice}/${s.tpl}/${s.ver}/33333333-3333-4333-8333-333333333333.zip`),
-        /row-level security/, 'bob with alice prefix');
-  fails(await upload(u.bob, 'template-files', `${u.bob}/x.zip`), /row-level security/, 'direct to clean bucket');
-  none(await as(db, u.alice, `select name from storage.objects where bucket_id = 'quarantine'`), 'quarantine readable');
+test('uploads: only a draft owner gets an upload path, within type, size and count limits', async () => {
+  const prep = (uid, name, size, ver = s.ver) => as(db, uid, `select public.prepare_file_upload($1, $2, $3) as path`, [ver, name, size]);
+  fails(await prep(u.bob, 'x.zip', 1000), /Version not found/, "someone else's version");
+  fails(await prep(null, 'x.zip', 1000), /permission denied/, 'anonymous');
+  fails(await prep(u.unverified, 'x.zip', 1000), /Verify your email/);
+  fails(await prep(u.alice, 'setup.exe', 1000), /not allowed/);
+  fails(await prep(u.alice, 'huge.zip', 300 * 1024 * 1024), /200 MB/);
+  fails(await prep(u.alice, 'empty.zip', 0), /200 MB/);
+  const [r] = ok(await prep(u.alice, 'Dashboard Kit.zip', 5_000_000));
+  assert.match(r.path, new RegExp(`^${u.alice}/${s.tpl}/${s.ver}/[0-9a-f-]{36}\.zip$`), 'server-chosen path');
+  s.zipPath = r.path;
 });
 
-test('register_file trusts storage for size and validates the path', async () => {
-  fails(await as(db, u.bob, `select public.register_file($1, $2, 'x.zip')`, [s.ver, s.zipPath]), /Version not found/);
-  fails(await as(db, u.alice, `select public.register_file($1, $2, 'x.zip')`,
-                 [s.ver, `${u.alice}/${s.tpl}/${s.ver}/99999999-9999-4999-8999-999999999999.zip`]), /Upload not found/);
-  fails(await as(db, u.alice, `select public.register_file($1, $2, 'evil.exe')`,
+test('register_file only accepts the server-issued path shape and records the signed size', async () => {
+  fails(await as(db, u.bob, `select public.register_file($1, $2, 'x.zip', 1000)`, [s.ver, s.zipPath]), /Version not found/);
+  fails(await as(db, u.alice, `select public.register_file($1, $2, 'x.zip', 1000)`, [s.ver, `${u.bob}/${s.tpl}/${s.ver}/11111111-1111-4111-8111-111111111111.zip`]),
+        /Invalid upload path/, "someone else's prefix");
+  fails(await as(db, u.alice, `select public.register_file($1, $2, 'x.zip', 1000)`, [s.ver, `${u.alice}/${s.tpl}/${s.ver}/../../evil.zip`]),
+        /Invalid upload path/, 'traversal');
+  fails(await as(db, u.alice, `select public.register_file($1, $2, 'evil.exe', 1000)`,
                  [s.ver, `${u.alice}/${s.tpl}/${s.ver}/11111111-1111-4111-8111-111111111111.exe`]), /not allowed/);
-  const [r] = ok(await as(db, u.alice, `select public.register_file($1, $2, 'dashboard-kit.zip') as id`, [s.ver, s.zipPath]));
+  const [r] = ok(await as(db, u.alice, `select public.register_file($1, $2, 'dashboard-kit.zip', 5000000) as id`, [s.ver, s.zipPath]));
   s.file = r.id;
-  const [f] = await sql(`select size_bytes, source_tool, scan_status from public.template_files where id = $1`, [s.file]);
+  const [f] = await sql(`select size_bytes, source_tool, scan_status, bucket from public.template_files where id = $1`, [s.file]);
   assert.equal(Number(f.size_bytes), 5_000_000);
   assert.equal(f.source_tool, 'code');
   assert.equal(f.scan_status, 'pending');
+  assert.equal(f.bucket, 'quarantine');
   fails(await as(db, u.alice, `update public.template_files set scan_status = 'clean' where id = $1`, [s.file]),
         /permission denied/, 'owner marks own file clean');
+  fails(await as(db, u.bob, `select * from public.delete_draft_file($1)`, [s.file]), /File not found/, 'bob deletes alice file');
+});
+
+test('media uploads: owner-only paths, image types and 10 MB cap', async () => {
+  const prep = (uid, type, size) => as(db, uid, `select public.prepare_media_upload($1, $2, $3) as path`, [s.tpl, type, size]);
+  fails(await prep(u.bob, 'image/png', 1000), /Template not found/);
+  fails(await prep(u.alice, 'image/svg+xml', 1000), /PNG, JPG/, 'SVG can carry script');
+  fails(await prep(u.alice, 'text/html', 1000), /PNG, JPG/);
+  fails(await prep(u.alice, 'image/png', 11 * 1024 * 1024), /10 MB/);
+  const [r] = ok(await prep(u.alice, 'image/webp', 200_000));
+  assert.match(r.path, new RegExp(`^${u.alice}/${s.tpl}/[0-9a-f-]{36}\.webp$`));
+  s.coverPath = r.path;
+  fails(await as(db, u.alice, `select public.register_media($1, $2, 'cover', 'desktop', 'An image', 10, 10)`,
+                 [s.tpl, `${u.bob}/${s.tpl}/11111111-1111-4111-8111-111111111111.webp`]), /Invalid media path/);
 });
 
 test('publish gate refuses until every requirement is met', async () => {
@@ -138,8 +149,7 @@ test('publish gate refuses until every requirement is met', async () => {
   fails(await pub(), /license/);
   ok(await as(db, u.alice, `update public.template_versions set license_code = 'MIT', changelog = 'First release' where id = $1`, [s.ver]));
   fails(await pub(), /cover/);
-  const cover = `${u.alice}/${s.tpl}/44444444-4444-4444-8444-444444444444.webp`;
-  ok(await upload(u.alice, 'media', cover));
+  const cover = s.coverPath;
   fails(await as(db, u.alice, `select public.register_media($1, $2, 'cover', 'desktop', '', 1600, 1000)`, [s.tpl, cover]),
         /alt_text/, 'empty alt text');
   ok(await as(db, u.alice, `select public.register_media($1, $2, 'cover', 'desktop', 'Dark analytics dashboard with MRR chart', 1600, 1000)`, [s.tpl, cover]));
@@ -276,9 +286,8 @@ test('yanking keeps history and blocks downloads of the pulled version', async (
   const [v2] = ok(await as(db, u.alice, `select public.create_version($1, '1.1.0') as id`, [s.tpl]));
   const [lic] = await sql(`select license_code from public.template_versions where id = $1`, [v2.id]);
   assert.equal(lic.license_code, 'MIT', 'license carried forward');
-  const v2path = `${u.alice}/${s.tpl}/${v2.id}/55555555-5555-4555-8555-555555555555.fig`;
-  ok(await upload(u.alice, 'quarantine', v2path, 2_000_000));
-  const [f2] = ok(await as(db, u.alice, `select public.register_file($1, $2, 'nocturne.fig') as id`, [v2.id, v2path]));
+  const [{ path: v2path }] = ok(await as(db, u.alice, `select public.prepare_file_upload($1, 'nocturne.fig', 2000000) as path`, [v2.id]));
+  const [f2] = ok(await as(db, u.alice, `select public.register_file($1, $2, 'nocturne.fig', 2000000) as id`, [v2.id, v2path]));
   ok(await as(db, 'service', `select * from public.claim_scan_jobs(1)`));
   ok(await as(db, 'service', `select public.complete_scan($1, 'clean', $2, $3, null, '{}'::jsonb, null)`,
               [f2.id, `${u.alice}/${s.tpl}/${v2.id}/nocturne.fig`, 'b'.repeat(64)]));
@@ -380,4 +389,18 @@ test('awards: Bayesian winner, minimum votes, and one win per template', async (
   fails(await as(db, u.alice, `select public.grant_award('day', current_date)`), /permission denied/);
   const notes = await sql(`select count(*)::int n from public.notifications where user_id = $1 and type = 'award'`, [creator]);
   assert.equal(notes[0].n, 1);
+});
+
+test('deleting a draft returns every object key so R2 can be cleaned up', async () => {
+  const [d] = ok(await as(db, u.alice, `select template_id, version_id from public.create_template('Throwaway draft', $1::smallint)`, [s.websites]));
+  const [{ path }] = ok(await as(db, u.alice, `select public.prepare_file_upload($1, 'a.zip', 1000) as path`, [d.version_id]));
+  ok(await as(db, u.alice, `select public.register_file($1, $2, 'a.zip', 1000)`, [d.version_id, path]));
+  const [{ path: img }] = ok(await as(db, u.alice, `select public.prepare_media_upload($1, 'image/png', 1000) as path`, [d.template_id]));
+  ok(await as(db, u.alice, `select public.register_media($1, $2, 'cover', 'desktop', 'Throwaway cover', 10, 10)`, [d.template_id, img]));
+  fails(await as(db, u.bob, `select * from public.delete_draft_template($1)`, [d.template_id]), /Template not found/);
+  const keys = ok(await as(db, u.alice, `select * from public.delete_draft_template($1)`, [d.template_id]));
+  assert.deepEqual(keys.map((k) => k.bucket).sort(), ['media', 'quarantine']);
+  assert.ok(keys.some((k) => k.storage_path === path) && keys.some((k) => k.storage_path === img));
+  none(await as(db, u.alice, `select id from public.templates where id = $1`, [d.template_id]), 'draft gone');
+  fails(await as(db, u.alice, `select * from public.delete_draft_template($1)`, [s.tpl]), /Template not found|Only drafts/, 'published template');
 });

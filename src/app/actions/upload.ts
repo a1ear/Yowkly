@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { revalidateTag } from 'next/cache';
 import { z } from 'zod';
 import { authed, fail, toUserError, type ActionResult } from '@/lib/actions';
-import { adminClient } from '@/lib/supabase/admin';
+import { deleteObjects, presignUpload } from '@/lib/r2';
 import { templateTag } from '@/lib/data/template';
 import { publicEnv } from '@/lib/env';
 
@@ -95,11 +95,28 @@ export async function saveLinks(templateId: string, _: WizardState, form: FormDa
   redirect(`/upload/${templateId}?step=3`);
 }
 
-export async function registerUpload(versionId: string, path: string, originalName: string): Promise<ActionResult<{ id: string }>> {
-  if (!uuid.safeParse(versionId).success || path.length > 300 || originalName.length > 200) return fail('Invalid upload.');
+/** Step 1 of an upload: Postgres approves (owner, draft, type, size, count, quota) and picks the path. */
+export async function startFileUpload(versionId: string, fileName: string, size: number): Promise<ActionResult<{ path: string; url: string }>> {
+  if (!uuid.safeParse(versionId).success || typeof fileName !== 'string' || fileName.length > 200 || !Number.isInteger(size)) return fail('Invalid upload.');
   const a = await authed('upload');
   if ('error' in a) return a.error;
-  const { data, error } = await a.db.rpc('register_file', { p_version: versionId, p_path: path, p_original_name: originalName });
+  const { data: path, error } = await a.db.rpc('prepare_file_upload', { p_version: versionId, p_filename: fileName, p_size: size });
+  if (error) return fail(toUserError(error));
+  try {
+    const url = await presignUpload('quarantine', path as string, { contentType: 'application/octet-stream', size });
+    return { ok: true, data: { path: path as string, url } };
+  } catch (e) {
+    console.error('[upload] presign failed', (e as Error).message);
+    return fail('Uploads are temporarily unavailable. Try again shortly.');
+  }
+}
+
+/** Step 2: record the finished upload. The scan worker verifies the real bytes before anything is public. */
+export async function registerUpload(versionId: string, path: string, originalName: string, size: number): Promise<ActionResult<{ id: string }>> {
+  if (!uuid.safeParse(versionId).success || path.length > 300 || originalName.length > 200 || !Number.isInteger(size)) return fail('Invalid upload.');
+  const a = await authed('upload');
+  if ('error' in a) return a.error;
+  const { data, error } = await a.db.rpc('register_file', { p_version: versionId, p_path: path, p_original_name: originalName, p_size: size });
   if (error) return fail(toUserError(error));
   return { ok: true, data: { id: data as string } };
 }
@@ -108,14 +125,10 @@ export async function removeFile(fileId: string): Promise<ActionResult> {
   if (!uuid.safeParse(fileId).success) return fail('Invalid file.');
   const a = await authed('upload');
   if ('error' in a) return a.error;
-  // The path is not client-readable. Look it up with the service key, but let
-  // RLS decide whether this user may delete the row before touching storage.
-  const admin = adminClient();
-  const { data: f } = await admin.from('template_files').select('bucket, storage_path').eq('id', fileId).maybeSingle();
-  const del = await a.db.from('template_files').delete().eq('id', fileId).select('id');
-  if (del.error) return fail(toUserError(del.error));
-  if (!del.data?.length) return fail('Files can only be removed from a draft version.');
-  if (f) await admin.storage.from(f.bucket).remove([f.storage_path]);
+  // Postgres checks ownership and draft status, deletes the row and hands back the key.
+  const { data, error } = await a.db.rpc('delete_draft_file', { p_file: fileId });
+  if (error) return fail(toUserError(error));
+  await deleteObjects((data ?? []) as { bucket: string; storage_path: string }[]);
   return { ok: true, data: null };
 }
 
@@ -129,6 +142,21 @@ const media = z.object({
   width: z.number().int().min(1).max(10000),
   height: z.number().int().min(1).max(20000),
 });
+
+export async function startMediaUpload(templateId: string, contentType: string, size: number): Promise<ActionResult<{ path: string; url: string }>> {
+  if (!uuid.safeParse(templateId).success || !Number.isInteger(size) || typeof contentType !== 'string') return fail('Invalid image.');
+  const a = await authed('upload');
+  if ('error' in a) return a.error;
+  const { data: path, error } = await a.db.rpc('prepare_media_upload', { p_template: templateId, p_content_type: contentType, p_size: size });
+  if (error) return fail(toUserError(error));
+  try {
+    const url = await presignUpload('media', path as string, { contentType, size });
+    return { ok: true, data: { path: path as string, url } };
+  } catch (e) {
+    console.error('[upload] presign failed', (e as Error).message);
+    return fail('Uploads are temporarily unavailable. Try again shortly.');
+  }
+}
 
 export async function registerMedia(input: z.input<typeof media>): Promise<ActionResult<{ id: string }>> {
   const parsed = media.safeParse(input);
@@ -161,7 +189,7 @@ export async function removeMedia(mediaId: string): Promise<ActionResult> {
   const res = await a.db.from('template_media').delete().eq('id', mediaId).select('path');
   if (res.error) return fail(toUserError(res.error));
   if (!res.data?.length) return fail('Image not found.');
-  await a.db.storage.from('media').remove([res.data[0].path as string]);
+  await deleteObjects([{ bucket: 'media', storage_path: res.data[0].path as string }]);
   return { ok: true, data: null };
 }
 
@@ -223,7 +251,8 @@ export async function deleteDraft(templateId: string): Promise<ActionResult> {
   if (!uuid.safeParse(templateId).success) return fail('Invalid template.');
   const a = await authed('write');
   if ('error' in a) return a.error;
-  const res = await a.db.from('templates').delete().eq('id', templateId).select('id');
-  if (res.error) return fail(toUserError(res.error));
-  return res.data?.length ? { ok: true, data: null } : fail('Only drafts that were never published can be deleted.');
+  const { data, error } = await a.db.rpc('delete_draft_template', { p_template: templateId });
+  if (error) return fail(toUserError(error));
+  await deleteObjects((data ?? []) as { bucket: string; storage_path: string }[]);
+  return { ok: true, data: null };
 }

@@ -477,6 +477,13 @@ score(t, u) = 0.35 · affinity(u, t.tags ∪ t.category)   -- from likes/downloa
 - **Next.js 16** (not 15): `proxy.ts` replaces middleware, and `revalidateTag(tag, profile)` takes two arguments.
 - **Moderation reject** returns the template to draft. The published-but-never-public version stays as history, and the creator publishes a fix as a new version.
 
+### Free-tier architecture (2026-09-28)
+Supabase Pro isn't affordable, so production runs at $0:
+- **Uploaded files and images moved to Cloudflare R2** (10 GB free, free downloads, no 50 MB cap). Postgres still authorises every upload (`prepare_file_upload`, `prepare_media_upload`) and download (`begin_download`); the server only signs R2 links for paths the database approved. Upload links sign the exact size and type.
+- **The web app no longer uses the Supabase service-role key.** Draft deletions go through owner-checked functions that return the R2 keys to delete.
+- **Resumable (tus) uploads were dropped**: single signed uploads up to 200 MB. Multipart uploads can come back if large files often fail.
+- **Backups:** nightly `pg_dump` to R2 from GitHub Actions (Supabase Free has none). **Scan worker:** GitHub Actions every 30 minutes, or an always-free VM.
+
 ## 16. Build status
 
 **Verification level (2026-09-28):** code complete for the milestones marked ✅. Lint and typecheck are clean, and 37 automated tests pass (29 database attack tests on PGlite/Postgres 18, 8 hostile-archive tests). In a real browser, only the pages that need no database have been checked (sign-in, 404, legal, mobile nav), plus HTTP status codes and security headers. **Every data-backed page and flow still needs an end-to-end run against local Supabase** (Docker Desktop's engine would not start on the dev machine).
