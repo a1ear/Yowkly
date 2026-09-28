@@ -9,7 +9,9 @@ async function findCategory(slug: string) {
 
 export async function generateMetadata(props: PageProps<'/c/[category]'>): Promise<Metadata> {
   const c = await findCategory((await props.params).category);
-  return c ? { title: `${c.name} templates`, description: c.description ?? undefined } : {};
+  return c
+    ? { title: `${c.name} templates`, description: c.description ?? `Browse, vote on and download ${c.name.toLowerCase()} templates and designs from developers on Yowkly.`, alternates: { canonical: `/c/${c.slug}` } }
+    : {};
 }
 
 export default async function CategoryPage(props: PageProps<'/c/[category]'>) {

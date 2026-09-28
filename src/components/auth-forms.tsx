@@ -31,6 +31,15 @@ function PasswordField({ label, error, onValue, ...input }: { label: string; err
   );
 }
 
+/** Hidden from people (and screen readers); bots fill it in. See isBot() in actions/auth.ts. */
+function Honeypot() {
+  return (
+    <div aria-hidden="true" className="absolute -left-[9999px] h-px w-px overflow-hidden">
+      <label>Company website<input type="text" name="company_site" tabIndex={-1} autoComplete="off" defaultValue="" /></label>
+    </div>
+  );
+}
+
 function Feedback({ state }: { state: AuthState }) {
   if (state?.error) return <p role="alert" className="m-0 flex items-start gap-2 text-[13px] text-danger"><Icon name="alert" size={16} className="mt-0.5 shrink-0" />{state.error}</p>;
   if (state?.message) return <p role="status" className="m-0 flex items-start gap-2 rounded-md bg-surface-2 p-3 text-[13px] text-ink"><Icon name="mail" size={16} className="mt-0.5 shrink-0 text-success" />{state.message}</p>;
@@ -43,7 +52,8 @@ export function SignInForm({ next }: { next: string }) {
   const [linkState, linkAction, linkPending] = useActionState(sendMagicLink, null);
   if (mode === 'link') {
     return (
-      <form action={linkAction} className="flex flex-col gap-4">
+      <form action={linkAction} className="relative flex flex-col gap-4">
+        <Honeypot />
         <input type="hidden" name="next" value={next} />
         <Field label="Email" name="email" type="email" autoComplete="email" required defaultValue={linkState?.email} error={Boolean(linkState?.error)} />
         <Feedback state={linkState} />
@@ -77,7 +87,8 @@ export function SignUpForm() {
     [/[0-9]/.test(pw), 'a number'],
   ];
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form action={action} className="relative flex flex-col gap-4">
+      <Honeypot />
       <Field label="Email" name="email" type="email" autoComplete="email" required defaultValue={state?.email} />
       <PasswordField label="Password" name="password" autoComplete="new-password" required minLength={10} aria-describedby="pw-hint" onValue={setPw} />
       <ul id="pw-hint" className="-mt-2 m-0 flex list-none flex-wrap gap-x-3 gap-y-1 p-0 text-[12.5px]" aria-label="Password requirements">
@@ -101,7 +112,8 @@ export function SignUpForm() {
 export function ResetForm() {
   const [state, action, pending] = useActionState(requestPasswordReset, null);
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form action={action} className="relative flex flex-col gap-4">
+      <Honeypot />
       <Field label="Email" name="email" type="email" autoComplete="email" required />
       <Feedback state={state} />
       <button className="btn btn-primary btn-lg" disabled={pending}>{pending ? 'Sending…' : 'Send reset link'}</button>

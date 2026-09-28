@@ -4,19 +4,13 @@ import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { registerMedia, removeMedia, startMediaUpload, updateMediaAlt } from '@/app/actions/upload';
 import { putWithProgress } from '@/lib/upload-client';
+import { shrinkImage } from '@/lib/image-shrink';
 import { useToast } from '../toast';
 import { Icon } from '../icons';
 import { mediaUrl } from '@/lib/labels';
 import type { DraftMedia } from '@/lib/data/draft';
 
 const TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/avif', 'image/gif'];
-
-async function dimensions(file: File) {
-  const bmp = await createImageBitmap(file);
-  const d = { width: bmp.width, height: bmp.height };
-  bmp.close();
-  return d;
-}
 
 export function MediaStep({ templateId, media, isMobile }: { templateId: string; media: DraftMedia[]; isMobile: boolean }) {
   const cover = media.find((m) => m.kind === 'cover');
@@ -61,7 +55,7 @@ function AddImage({ templateId, kind, label }: { templateId: string; kind: 'cove
   const pick = (f?: File) => {
     if (!f) return;
     if (!TYPES.includes(f.type)) return toast({ text: 'Use a PNG, JPG, WebP, AVIF or GIF image.', tone: 'error' });
-    if (f.size > 10 * 1024 * 1024) return toast({ text: 'Images can be up to 10 MB.', tone: 'error' });
+    if (f.size > 10 * 1024 * 1024) return toast({ text: 'Images can be up to 10 MB. They are compressed before upload.', tone: 'error' });
     setFile(f);
     setPreview(URL.createObjectURL(f));
   };
@@ -69,11 +63,13 @@ function AddImage({ templateId, kind, label }: { templateId: string; kind: 'cove
   const save = () => start(async () => {
     if (!file) return;
     if (alt.trim().length < 3) return toast({ text: 'Describe the image in a few words (alt text).', tone: 'error' });
-    const { width, height } = await dimensions(file);
-    const start = await startMediaUpload(templateId, file.type, file.size);
+    // Screens stay sharp at phone-frame height; everything else is capped at 1600 px.
+    const img = await shrinkImage(file, kind === 'mobile_screen' ? 2000 : 1600);
+    const { width, height } = img;
+    const start = await startMediaUpload(templateId, img.type, img.blob.size);
     if (!start.ok) return toast({ text: start.error, tone: 'error' });
     try {
-      await putWithProgress(start.data.url, file, file.type, () => {}).done;
+      await putWithProgress(start.data.url, img.blob, img.type, () => {}).done;
     } catch {
       return toast({ text: 'Upload failed. Try again.', tone: 'error' });
     }

@@ -4,6 +4,8 @@ import { SiteHeader } from '@/components/site-header';
 import { SiteFooter } from '@/components/site-footer';
 import { MobileTabs } from '@/components/mobile-tabs';
 import { Toaster } from '@/components/toast';
+import { CookieNotice } from '@/components/cookie-notice';
+import { Analytics } from '@vercel/analytics/next';
 import { publicEnv } from '@/lib/env';
 import './globals.css';
 
@@ -37,7 +39,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           <main id="main">{children}</main>
           <SiteFooter />
           <MobileTabs />
+          <CookieNotice />
         </Toaster>
+        {/* Cookie-free page-view analytics; reports only when deployed on Vercel. */}
+        <Analytics />
       </body>
     </html>
   );

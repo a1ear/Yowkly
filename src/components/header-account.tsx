@@ -2,41 +2,34 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { browserClient } from '@/lib/supabase/browser';
+import { signOut as serverSignOut } from '@/app/actions/auth';
 import { YOWKBITS_EVENT } from '@/lib/events';
 import { Icon } from './icons';
 import { Avatar } from './bits';
 
 type Me = { id: string; username: string; display_name: string; avatar_path: string | null; unread: number; balance: number };
 
-/** Loads the signed-in user in the browser so every public page can stay cached. */
+/**
+ * Loads the signed-in user in the browser so every public page can stay cached.
+ * Uses /api/me rather than the Supabase client, which keeps ~65 KB of
+ * JavaScript off pages that don't otherwise need it.
+ */
 export function useMe() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
-  // Sign-in/out happen in server actions followed by a client navigation, which
-  // fires no auth event in the browser, so re-check on every route change too.
+  // Sign-in/out happen in server actions followed by a client navigation, so
+  // re-check on every route change.
   const pathname = usePathname();
   useEffect(() => {
-    const db = browserClient();
-    let cancelled = false;
-    async function load() {
-      const { data } = await db.auth.getClaims();
-      const uid = data?.claims?.sub;
-      if (!uid) return !cancelled && setMe(null);
-      const [{ data: p }, { count }, { data: w }] = await Promise.all([
-        db.from('profiles').select('id, username, display_name, avatar_path').eq('id', uid).maybeSingle(),
-        db.from('notifications').select('id', { count: 'exact', head: true }).is('read_at', null),
-        db.from('yowkbit_wallets').select('balance').eq('user_id', uid).maybeSingle(),
-      ]);
-      if (!cancelled) setMe(p ? { ...p, unread: count ?? 0, balance: (w as { balance: number } | null)?.balance ?? 0 } : null);
-    }
-    load();
-    const { data: sub } = db.auth.onAuthStateChange(() => load());
+    const ctrl = new AbortController();
+    fetch('/api/me', { signal: ctrl.signal, cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : { me: null }))
+      .then((d: { me: Me | null }) => setMe(d.me))
+      .catch(() => { if (!ctrl.signal.aborted) setMe(null); });
     // A vote on a template page reports the new balance straight away.
     const onSpend = (e: Event) => setMe((m) => (m ? { ...m, balance: Number((e as CustomEvent).detail) } : m));
     window.addEventListener(YOWKBITS_EVENT, onSpend);
     return () => {
-      cancelled = true;
-      sub.subscription.unsubscribe();
+      ctrl.abort();
       window.removeEventListener(YOWKBITS_EVENT, onSpend);
     };
   }, [pathname]);
@@ -62,9 +55,8 @@ export function HeaderAccount() {
   }, [open]);
 
   async function signOut() {
-    await browserClient().auth.signOut();
     setOpen(false);
-    router.push('/');
+    await serverSignOut(); // clears the session cookie and redirects home
     router.refresh();
   }
 

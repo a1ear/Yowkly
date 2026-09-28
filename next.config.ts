@@ -13,7 +13,8 @@ const dev = process.env.NODE_ENV !== 'production';
 // never rendering user HTML (no dangerouslySetInnerHTML with user input).
 const csp = [
   "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${dev ? " 'unsafe-eval'" : ''}`,
+  // In development @vercel/analytics loads its debug script from Vercel's CDN; in production it's same-origin.
+  `script-src 'self' 'unsafe-inline'${dev ? " 'unsafe-eval' https://va.vercel-scripts.com" : ''}`,
   "style-src 'self' 'unsafe-inline'",
   `img-src 'self' data: blob: ${supabase} ${media}`,
   "font-src 'self'",

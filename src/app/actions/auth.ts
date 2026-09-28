@@ -14,6 +14,9 @@ async function clientKey() {
   return h.get('x-forwarded-for')?.split(',')[0]?.trim() || h.get('x-real-ip') || 'local';
 }
 
+/** Honeypot: a field people never see. Bots that fill every input get a fake success and nothing happens. */
+const isBot = (form: FormData) => String(form.get('company_site') ?? '').length > 0;
+
 async function limited() {
   const r = await rateLimit('auth', await clientKey());
   return r.ok ? null : `Too many attempts. Try again in ${Math.ceil(r.retryAfterSec / 60)} minutes.`;
@@ -52,6 +55,7 @@ export async function signUp(_: AuthState, form: FormData): Promise<AuthState> {
   const parsed = z.object({ email, password }).safeParse({ email: form.get('email'), password: form.get('password') });
   if (!parsed.success) return { error: parsed.error.issues[0].message, email: String(form.get('email') ?? '') };
   if (form.get('terms') !== 'on') return { error: 'Accept the Terms and Privacy Policy to continue.', email: parsed.data.email };
+  if (isBot(form)) return { message: `Check ${parsed.data.email} for a link to confirm your account.` };
   const tooMany = await limited();
   if (tooMany) return { error: tooMany, email: parsed.data.email };
 
@@ -71,6 +75,7 @@ export async function sendMagicLink(_: AuthState, form: FormData): Promise<AuthS
   const next = safeNext(form.get('next'));
   const parsed = email.safeParse(form.get('email'));
   if (!parsed.success) return { error: parsed.error.issues[0].message };
+  if (isBot(form)) return { message: `If ${parsed.data} has an account, a sign-in link is on its way.` };
   const tooMany = await limited();
   if (tooMany) return { error: tooMany, email: parsed.data };
   const db = await userClient();
@@ -90,6 +95,7 @@ export async function oauth(form: FormData) {
 export async function requestPasswordReset(_: AuthState, form: FormData): Promise<AuthState> {
   const parsed = email.safeParse(form.get('email'));
   if (!parsed.success) return { error: parsed.error.issues[0].message };
+  if (isBot(form)) return { message: `If ${parsed.data} has an account, a reset link is on its way.` };
   const tooMany = await limited();
   if (tooMany) return { error: tooMany };
   const db = await userClient();
