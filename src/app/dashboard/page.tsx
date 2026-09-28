@@ -106,7 +106,7 @@ export default async function DashboardPage(props: PageProps<'/dashboard'>) {
                   <th scope="col" className="px-4 py-3 font-medium">Status</th>
                   <th scope="col" className="px-4 py-3 font-medium">Version</th>
                   <th scope="col" className="px-4 py-3 text-right font-medium">Downloads</th>
-                  <th scope="col" className="px-4 py-3 text-right font-medium">Score</th>
+                  <th scope="col" className="px-4 py-3 text-right font-medium">Votes</th>
                   <th scope="col" className="px-4 py-3 text-right font-medium"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
@@ -124,7 +124,7 @@ export default async function DashboardPage(props: PageProps<'/dashboard'>) {
                     <td className="px-4 py-3"><StatusPill status={scanningIds.has(t.id) && t.status === 'draft' ? 'scanning' : t.status} /></td>
                     <td className="px-4 py-3 font-mono text-ink-2">{t.version ? `v${t.version}` : '—'}</td>
                     <td className="px-4 py-3 text-right font-mono">{t.status === 'draft' ? '—' : formatCount(t.download_count)}</td>
-                    <td className="px-4 py-3 text-right font-mono">{t.vote_count >= 5 && t.score != null ? Number(t.score).toFixed(1) : '—'}</td>
+                    <td className="px-4 py-3 text-right font-mono">{t.status === 'draft' ? '—' : formatCount(t.vote_count)}</td>
                     <td className="px-4 py-3"><RowActions id={t.id} slug={t.slug} status={t.status} /></td>
                   </tr>
                 ))}

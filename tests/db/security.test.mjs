@@ -28,7 +28,7 @@ before(async () => {
   u.alice = await createUser(db, { email: 'alice@test.dev', meta: { user_name: 'alice' } }); // creator
   u.bob = await createUser(db, { email: 'bob@test.dev', meta: { user_name: 'bob' } });       // voter
   u.carol = await createUser(db, { email: 'carol@test.dev' });                                // bystander
-  u.newbie = await createUser(db, { email: 'newbie@test.dev', ageDays: 1 });
+  u.newbie = await createUser(db, { email: 'newbie@test.dev', ageDays: 0 });
   u.unverified = await createUser(db, { email: 'unverified@test.dev', verified: false });
   u.mod = await createUser(db, { email: 'mod@test.dev' });
   await db.query(`insert into public.user_roles (user_id, role) values ($1, 'moderator')`, [u.mod]);
@@ -37,7 +37,7 @@ before(async () => {
 
 // ─────────────────────────────────────────────── defaults
 test('anon cannot read private tables', async () => {
-  for (const t of ['votes', 'downloads', 'notifications', 'reports', 'moderation_log',
+  for (const t of ['votes', 'yowkbit_wallets', 'yowkbit_ledger', 'downloads', 'notifications', 'reports', 'moderation_log',
                    'user_roles', 'license_acceptances', 'template_view_daily', 'reserved_usernames']) {
     fails(await as(db, null, `select * from public.${t} limit 1`), /permission denied/, t);
   }
@@ -213,31 +213,64 @@ test('downloads require sign-in, license acceptance, and are counted once per da
 });
 
 // ─────────────────────────────────────────────── votes & likes
-test('voting rules: no self-votes, no new or unverified accounts, one vote each', async () => {
-  const vote = (uid, code = null) => as(db, uid,
-    `insert into public.votes (template_id, design, usability, creativity, code_quality) values ($1, 9, 8, 8, $2)`, [s.tpl, code]);
-  fails(await vote(u.alice), /row-level security/, 'self vote');
-  fails(await vote(u.newbie), /row-level security/, '1-day-old account');
-  fails(await vote(u.unverified), /row-level security/, 'unverified');
+test('voting rules: no self-votes, no brand-new or unverified accounts, one vote each', async () => {
+  const vote = (uid) => as(db, uid, `select * from public.cast_vote($1)`, [s.tpl]);
+  fails(await vote(u.alice), /own work/, 'self vote');
+  fails(await vote(u.newbie), /24 hours/, 'account created today');
+  fails(await vote(u.unverified), /Verify your email/, 'unverified');
   fails(await vote(null), /permission denied/, 'anon');
-  ok(await vote(u.bob, 9));
-  fails(await vote(u.bob), /duplicate key/, 'double vote');
-  fails(await as(db, u.carol, `insert into public.votes (user_id, template_id, design, usability, creativity)
-                               values ($1, $2, 1, 1, 1)`, [u.bob, s.tpl]), /permission denied/, 'vote as someone else');
-  none(await as(db, u.carol, `select * from public.votes`), 'carol reads bob vote');
-  const [e] = ok(await as(db, u.newbie, `select public.vote_eligibility($1) as e`, [s.tpl]));
-  assert.equal(e.e, 'too_new');
+  const [r] = ok(await vote(u.bob));
+  assert.equal(r.balance, 99, 'a vote costs exactly one yowkbit');
+  assert.equal(r.vote_count, 1);
+  fails(await vote(u.bob), /already voted/, 'double vote');
+  const [e] = ok(await as(db, u.bob, `select public.vote_eligibility($1) as e`, [s.tpl]));
+  assert.equal(e.e, 'voted');
+  const [n] = ok(await as(db, u.newbie, `select public.vote_eligibility($1) as e`, [s.tpl]));
+  assert.equal(n.e, 'too_new');
 });
 
-test('vote stats stay consistent through edits', async () => {
-  ok(await as(db, u.carol, `insert into public.votes (template_id, design, usability, creativity) values ($1, 6, 6, 6)`, [s.tpl]));
-  ok(await as(db, u.bob, `update public.votes set design = 10 where template_id = $1`, [s.tpl]));
-  fails(await as(db, u.bob, `update public.votes set weight = 50 where template_id = $1`, [s.tpl]), /permission denied/);
-  const [st] = await sql(`select vote_count, weight_sum, score_sum, design_sum from public.template_stats where template_id = $1`, [s.tpl]);
-  const [agg] = await sql(`select count(*)::int n, sum(score * weight) s, sum(design * weight) d from public.votes where template_id = $1`, [s.tpl]);
+test('votes cannot be forged, edited, retracted or read by others', async () => {
+  fails(await as(db, u.carol, `insert into public.votes (user_id, template_id) values ($1, $2)`, [u.bob, s.tpl]),
+        /permission denied/, 'direct insert as someone else');
+  fails(await as(db, u.carol, `insert into public.votes (template_id) values ($1)`, [s.tpl]),
+        /permission denied/, 'direct insert skipping the wallet');
+  fails(await as(db, u.bob, `delete from public.votes where template_id = $1`, [s.tpl]), /permission denied/, 'retract');
+  fails(await as(db, u.bob, `update public.votes set created_at = now() where template_id = $1`, [s.tpl]), /permission denied/, 'edit');
+  await assert.rejects(db.query(`update public.votes set created_at = now()`), /final/, 'even the service role cannot edit a vote');
+  none(await as(db, u.carol, `select * from public.votes`), 'carol reads bob vote');
+});
+
+test('yowkbits: 100 at sign-up, spent only through votes, never below zero', async () => {
+  const fresh = await createUser(db, { email: 'wallet@test.dev' });
+  const [w] = ok(await as(db, fresh, `select balance from public.yowkbit_wallets`));
+  assert.equal(w.balance, 100);
+  const [l] = ok(await as(db, fresh, `select delta, reason from public.yowkbit_ledger`));
+  assert.deepEqual({ ...l }, { delta: 100, reason: 'signup_grant' });
+
+  fails(await as(db, fresh, `update public.yowkbit_wallets set balance = 1000000`), /permission denied/, 'mint yowkbits');
+  fails(await as(db, fresh, `insert into public.yowkbit_ledger (user_id, delta, reason) values ($1, 500, 'adjustment')`, [fresh]),
+        /permission denied/, 'forge a ledger entry');
+  none(await as(db, fresh, `select * from public.yowkbit_wallets where user_id = $1`, [u.bob]), 'read another wallet');
+  none(await as(db, fresh, `select * from public.yowkbit_ledger where user_id = $1`, [u.bob]), 'read another ledger');
+  await assert.rejects(db.query(`update public.yowkbit_ledger set delta = 5 where user_id = $1`, [fresh]), /append-only/);
+
+  await db.query(`update public.yowkbit_wallets set balance = 0 where user_id = $1`, [fresh]);
+  const [e] = ok(await as(db, fresh, `select public.vote_eligibility($1) as e`, [s.tpl]));
+  assert.equal(e.e, 'no_bits');
+  fails(await as(db, fresh, `select * from public.cast_vote($1)`, [s.tpl]), /out of yowkbits/);
+  await assert.rejects(db.query(`update public.yowkbit_wallets set balance = -1 where user_id = $1`, [fresh]), /check constraint/);
+});
+
+test('vote counts and the ledger always agree', async () => {
+  ok(await as(db, u.carol, `select * from public.cast_vote($1)`, [s.tpl]));
+  const [st] = await sql(`select vote_count from public.template_stats where template_id = $1`, [s.tpl]);
+  const [agg] = await sql(`select count(*)::int n from public.votes where template_id = $1`, [s.tpl]);
   assert.equal(st.vote_count, agg.n);
-  assert.equal(Number(st.score_sum), Number(agg.s));
-  assert.equal(Number(st.design_sum), Number(agg.d));
+  for (const uid of [u.bob, u.carol]) {
+    const [b] = await sql(`select w.balance, (select sum(delta)::int from public.yowkbit_ledger l where l.user_id = w.user_id) as ledger
+                           from public.yowkbit_wallets w where w.user_id = $1`, [uid]);
+    assert.equal(b.balance, b.ledger, 'wallet balance equals the sum of its ledger');
+  }
 });
 
 test('likes: only published templates, only as yourself', async () => {
@@ -362,33 +395,56 @@ test('for_you is personal and refuses anonymous callers', async () => {
   assert.ok(!feed.some((f) => own.some((o) => o.id === f.template_id)), 'own templates excluded');
 });
 
-test('awards: Bayesian winner, minimum votes, and one win per template', async () => {
-  // Fresh, isolated set-up: two published templates, one with many strong votes, one with few perfect ones.
+test('ranking: most votes in the period wins, with a minimum, once per template', async () => {
   const creator = await createUser(db, { email: 'award-creator@test.dev' });
-  await db.query(`update public.profiles set trust_level = 1 where id = $1`, [creator]);
-  const mk = async (title) => {
-    const [r] = ok(await as(db, creator, `select * from public.create_template($1, $2::smallint)`, [title, s.websites]));
-    await db.query(`update public.templates set status = 'published', published_at = now() - interval '1 day' where id = $1`, [r.template_id]);
+  const rival = await createUser(db, { email: 'award-rival@test.dev' });
+  const mk = async (owner, title) => {
+    const [r] = ok(await as(db, owner, `select * from public.create_template($1, $2::smallint)`, [title, s.websites]));
+    await db.query(`update public.templates set status = 'published', published_at = '2029-12-01' where id = $1`, [r.template_id]);
     return r.template_id;
   };
-  const strong = await mk('Many strong votes');
-  const lucky = await mk('Three perfect votes');
+  const popular = await mk(creator, 'Six votes on the day');
+  const second = await mk(creator, 'Four votes on the day');
+  const few = await mk(rival, 'Three votes on the day');
   const voters = [];
-  for (let i = 0; i < 12; i++) voters.push(await createUser(db, { email: `voter${i}@test.dev` }));
-  for (const v of voters) await db.query(`insert into public.votes (user_id, template_id, design, usability, creativity) values ($1, $2, 9, 9, 9)`, [v, strong]);
-  for (const v of voters.slice(0, 3)) await db.query(`insert into public.votes (user_id, template_id, design, usability, creativity) values ($1, $2, 10, 10, 10)`, [v, lucky]);
+  for (let i = 0; i < 6; i++) voters.push(await createUser(db, { email: `voter${i}@test.dev` }));
+  const castAt = (voter, tpl, at) =>
+    db.query(`insert into public.votes (user_id, template_id, created_at) values ($1, $2, $3)`, [voter, tpl, at]);
+  for (const v of voters) await castAt(v, popular, '2030-01-01 10:00Z');
+  for (const v of voters.slice(0, 4)) await castAt(v, second, '2030-01-01 11:00Z');
+  for (const v of voters.slice(0, 3)) await castAt(v, few, '2030-01-01 12:00Z');
+  await castAt(voters[5], few, '2030-01-02 09:00Z'); // next day: must not count for Jan 1
 
-  const day = '2030-01-01';
-  await db.query(`update public.templates set published_at = '2029-12-31' where id = any($1)`, [[strong, lucky]]);
-  const [{ grant_award: first }] = await sql(`select public.grant_award('day', $1::date)`, [day]);
-  const [a1] = await sql(`select template_id from public.awards where id = $1`, [first]);
-  assert.equal(a1.template_id, strong, '12 strong votes beat 3 perfect ones (and 3 is under the 10-vote minimum)');
-
-  const [{ grant_award: second }] = await sql(`select public.grant_award('day', '2030-01-02'::date)`);
-  assert.equal(second, null, 'the same template cannot win the day award twice, and the other lacks votes');
+  const [{ grant_award: first }] = await sql(`select public.grant_award('day', '2030-01-01'::date)`);
+  const [a1] = await sql(`select template_id, period_votes, score_snapshot from public.awards where id = $1`, [first]);
+  assert.equal(a1.template_id, popular, 'most votes that day wins');
+  assert.equal(a1.period_votes, 6);
+  assert.equal(a1.score_snapshot, null);
+  const [{ grant_award: next }] = await sql(`select public.grant_award('day', '2030-01-02'::date)`);
+  assert.equal(next, null, 'one vote on Jan 2 is under the 3-vote minimum');
+  await assert.rejects(db.query(`update public.awards set period_votes = 99 where id = $1`, [first]), /immutable/);
   fails(await as(db, u.alice, `select public.grant_award('day', current_date)`), /permission denied/);
   const notes = await sql(`select count(*)::int n from public.notifications where user_id = $1 and type = 'award'`, [creator]);
   assert.equal(notes[0].n, 1);
+
+  // Dev of the Week sums votes across a creator's templates (6 + 4 beats 3 + 1).
+  fails(await as(db, u.alice, `select public.grant_dev_of_week('2029-12-31')`), /permission denied/);
+  await assert.rejects(db.query(`select public.grant_dev_of_week('2030-01-01')`), /Monday/);
+  const [{ grant_dev_of_week: dev }] = await sql(`select public.grant_dev_of_week('2029-12-31')`);
+  const [d] = await sql(`select user_id, vote_count, template_count from public.dev_awards where id = $1`, [dev]);
+  assert.deepEqual({ ...d }, { user_id: creator, vote_count: 10, template_count: 2 });
+  const [{ grant_dev_of_week: twice }] = await sql(`select public.grant_dev_of_week('2029-12-31')`);
+  assert.equal(twice, null, 'one Dev of the Week per week');
+  await assert.rejects(db.query(`update public.dev_awards set vote_count = 1`), /immutable/);
+  const pub = ok(await as(db, null, `select user_id from public.dev_awards`));
+  assert.equal(pub.length, 1, 'winners are public');
+});
+
+test('live standings expose counts, never voters', async () => {
+  const rows = ok(await as(db, null, `select * from public.ranking_templates('week', 5)`));
+  for (const r of rows) assert.deepEqual(Object.keys(r).sort(), ['template_id', 'votes']);
+  const devs = ok(await as(db, null, `select * from public.ranking_devs(5)`));
+  for (const r of devs) assert.deepEqual(Object.keys(r).sort(), ['templates', 'user_id', 'votes']);
 });
 
 test('deleting a draft returns every object key so R2 can be cleaned up', async () => {

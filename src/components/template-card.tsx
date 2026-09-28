@@ -12,7 +12,7 @@ export function TemplateCard({ t, priority = false, tall = false }: { t: Card; p
   const tools = displayTools(t.tools);
   const stacks = t.tags.filter((g) => STACK_TYPES.has(g.type)).slice(0, 2);
   return (
-    <article className="group relative flex min-w-0 flex-col gap-3">
+    <article className="reveal group relative flex min-w-0 flex-col gap-3">
       <div className={`card-hover relative overflow-hidden rounded-lg bg-surface-2 shadow-[inset_0_0_0_1px_var(--line)] ${tall ? 'aspect-[9/14]' : 'aspect-[16/10]'}`}>
         <Cover seed={t.slug} title={t.title} coverPath={t.cover_path} kind={t.category_kind} priority={priority} tall={tall} />
         {t.award && (
@@ -33,7 +33,7 @@ export function TemplateCard({ t, priority = false, tall = false }: { t: Card; p
             <Avatar name={t.owner_display_name} path={t.owner_avatar_path} seed={t.owner_username} />
             <span className="truncate">{t.owner_display_name}</span>
           </span>
-          <Stats score={t.score} votes={t.vote_count} likes={t.like_count} downloads={t.download_count} />
+          <Stats votes={t.vote_count} likes={t.like_count} downloads={t.download_count} />
         </div>
         <div className="flex flex-wrap items-center gap-[5px]">
           {tools.map((tool) => <span key={tool} className="chip-tool">{tool}</span>)}
@@ -57,7 +57,7 @@ export function TemplateRow({ t }: { t: Card }) {
           {t.owner_display_name} · {displayTools(t.tools).join(', ') || t.category_name}
         </span>
       </div>
-      <Stats score={t.score} votes={t.vote_count} likes={t.like_count} downloads={t.download_count} />
+      <Stats votes={t.vote_count} likes={t.like_count} downloads={t.download_count} />
       <Icon name="chevronRight" size={16} className="text-ink-3" />
     </article>
   );

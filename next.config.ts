@@ -28,6 +28,9 @@ const csp = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  async redirects() {
+    return [{ source: '/awards', destination: '/ranking', permanent: true }];
+  },
   async rewrites() {
     return [{ source: '/@:username', destination: '/u/:username' }];
   },

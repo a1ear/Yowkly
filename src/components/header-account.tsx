@@ -3,10 +3,11 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { browserClient } from '@/lib/supabase/browser';
+import { YOWKBITS_EVENT } from '@/lib/events';
 import { Icon } from './icons';
 import { Avatar } from './bits';
 
-type Me = { id: string; username: string; display_name: string; avatar_path: string | null; unread: number };
+type Me = { id: string; username: string; display_name: string; avatar_path: string | null; unread: number; balance: number };
 
 /** Loads the signed-in user in the browser so every public page can stay cached. */
 export function useMe() {
@@ -21,17 +22,22 @@ export function useMe() {
       const { data } = await db.auth.getClaims();
       const uid = data?.claims?.sub;
       if (!uid) return !cancelled && setMe(null);
-      const [{ data: p }, { count }] = await Promise.all([
+      const [{ data: p }, { count }, { data: w }] = await Promise.all([
         db.from('profiles').select('id, username, display_name, avatar_path').eq('id', uid).maybeSingle(),
         db.from('notifications').select('id', { count: 'exact', head: true }).is('read_at', null),
+        db.from('yowkbit_wallets').select('balance').eq('user_id', uid).maybeSingle(),
       ]);
-      if (!cancelled) setMe(p ? { ...p, unread: count ?? 0 } : null);
+      if (!cancelled) setMe(p ? { ...p, unread: count ?? 0, balance: (w as { balance: number } | null)?.balance ?? 0 } : null);
     }
     load();
     const { data: sub } = db.auth.onAuthStateChange(() => load());
+    // A vote on a template page reports the new balance straight away.
+    const onSpend = (e: Event) => setMe((m) => (m ? { ...m, balance: Number((e as CustomEvent).detail) } : m));
+    window.addEventListener(YOWKBITS_EVENT, onSpend);
     return () => {
       cancelled = true;
       sub.subscription.unsubscribe();
+      window.removeEventListener(YOWKBITS_EVENT, onSpend);
     };
   }, [pathname]);
   return me;
@@ -77,6 +83,15 @@ export function HeaderAccount() {
       {me && (
         <>
           <Link
+            href="/ranking#yowkbits"
+            title="Yowkbits: spend 1 to vote for a template"
+            aria-label={`${me.balance} yowkbits left`}
+            className="bit-chip inline-flex h-9 items-center gap-1.5 rounded-full px-2.5 font-mono text-[13px] text-ink shadow-[inset_0_0_0_1px_var(--line)] hover:text-accent-ink sm:px-3"
+          >
+            <Icon name="bit" size={15} strokeWidth={2} className="text-accent-ink" />
+            <span key={me.balance} className="count-pop">{me.balance}</span>
+          </Link>
+          <Link
             href="/notifications"
             aria-label={me.unread ? `Notifications, ${me.unread} unread` : 'Notifications'}
             className="relative inline-flex h-11 w-11 items-center justify-center rounded-md text-ink hover:bg-surface-2"
@@ -121,19 +136,4 @@ export function HeaderAccount() {
       )}
     </div>
   );
-}
-
-/** ⌘K / Ctrl+K focuses the header search. */
-export function SearchShortcut() {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        document.getElementById('site-search')?.focus();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
-  return null;
 }

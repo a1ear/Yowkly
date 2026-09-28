@@ -43,7 +43,6 @@ export default async function TemplatePage(props: PageProps<'/t/[slug]'>) {
   const [related, licenses] = await Promise.all([getRelated(card), getLicenses()]);
   const gallery = d.media.filter((m) => m.kind !== 'cover');
   const screens = d.media.filter((m) => m.kind === 'mobile_screen');
-  const hasCode = card.tools.includes('code') || card.tools.includes('github');
   const currentFiles = d.files.filter((f) => f.version_id === d.currentVersionId);
   const manifest = currentFiles.flatMap((f) => (f.manifest?.entries ?? []).map((e) => ({ ...e, file: f.original_name })));
   const visibleComments = d.comments.filter((c) => !c.deleted_at).length;
@@ -57,9 +56,6 @@ export default async function TemplatePage(props: PageProps<'/t/[slug]'>) {
     datePublished: card.published_at ?? undefined,
     license: d.license?.url ?? undefined,
     version: card.version ?? undefined,
-    ...(card.vote_count >= 5 && card.score != null
-      ? { aggregateRating: { '@type': 'AggregateRating', ratingValue: card.score, bestRating: 10, worstRating: 1, ratingCount: card.vote_count } }
-      : {}),
   };
 
   return (
@@ -177,7 +173,7 @@ export default async function TemplatePage(props: PageProps<'/t/[slug]'>) {
             </div>
             <DownloadPanel versions={d.versions} files={d.files} currentVersionId={d.currentVersionId} licenses={licenses} links={d.links} />
             <ActionRow likeCount={card.like_count} title={card.title} />
-            <VoteModule score={card.score} breakdown={d.breakdown} hasCode={hasCode} />
+            <VoteModule voteCount={d.voteCount} />
           </aside>
         </div>
 

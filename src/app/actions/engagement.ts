@@ -1,5 +1,5 @@
 'use server';
-import { revalidateTag } from 'next/cache';
+import { revalidateTag, updateTag } from 'next/cache';
 import { z } from 'zod';
 import { authed, fail, toUserError, type ActionResult } from '@/lib/actions';
 import { templateTag } from '@/lib/data/template';
@@ -20,41 +20,34 @@ export async function setLike(templateId: string, liked: boolean): Promise<Actio
   return { ok: true, data: { liked } };
 }
 
-const score = z.number().int().min(1).max(10);
-const voteSchema = z.object({
-  templateId: uuid,
-  design: score,
-  usability: score,
-  creativity: score,
-  codeQuality: score.nullable(),
-});
-
 const VOTE_REASONS: Record<string, string> = {
   auth: 'Sign in to vote.',
   own: "You can't vote on your own work.",
   unverified: 'Verify your email to vote.',
-  too_new: 'Accounts can vote after 7 days.',
+  too_new: 'New accounts can vote 24 hours after signing up.',
+  voted: 'You already voted for this template.',
+  no_bits: 'You are out of yowkbits.',
   not_published: 'Voting opens once the template is published.',
 };
 
-export async function submitVote(input: z.input<typeof voteSchema>): Promise<ActionResult<{ updated: boolean }>> {
-  const parsed = voteSchema.safeParse(input);
-  if (!parsed.success) return fail('Rate every criterion from 1 to 10.');
-  const v = parsed.data;
+/**
+ * Spend 1 yowkbit on a template. Votes are final and one per template; the
+ * database (cast_vote) re-checks everything and moves the yowkbit atomically.
+ */
+export async function castVote(templateId: string): Promise<ActionResult<{ balance: number; voteCount: number }>> {
+  if (!uuid.safeParse(templateId).success) return fail('Invalid template.');
   const a = await authed('vote');
   if ('error' in a) return a.error;
 
-  const { data: reason } = await a.db.rpc('vote_eligibility', { p_template: v.templateId });
+  const { data: reason } = await a.db.rpc('vote_eligibility', { p_template: templateId });
   if (reason !== 'ok') return fail(VOTE_REASONS[reason as string] ?? 'You cannot vote on this template.', String(reason));
 
-  const row = { design: v.design, usability: v.usability, creativity: v.creativity, code_quality: v.codeQuality };
-  const existing = await a.db.from('votes').select('template_id').eq('template_id', v.templateId).eq('user_id', a.uid).maybeSingle();
-  const res = existing.data
-    ? await a.db.from('votes').update(row).eq('template_id', v.templateId).eq('user_id', a.uid)
-    : await a.db.from('votes').insert({ template_id: v.templateId, ...row });
+  const res = await a.db.rpc('cast_vote', { p_template: templateId });
   if (res.error) return fail(toUserError(res.error));
-  revalidateTag(templateTag(v.templateId), 'max');
-  return { ok: true, data: { updated: Boolean(existing.data) } };
+  const [row] = res.data as { balance: number; vote_count: number }[];
+  // Read-your-own-write: the voter's next page load must show their vote, not a stale count.
+  updateTag(templateTag(templateId));
+  return { ok: true, data: { balance: row.balance, voteCount: row.vote_count } };
 }
 
 export async function setFollow(userId: string, follow: boolean): Promise<ActionResult<{ following: boolean }>> {

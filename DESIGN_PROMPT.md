@@ -6,7 +6,7 @@
 
 Design the complete frontend UI for **Yowkly**, a community platform where developers and designers publish **web templates, mobile app designs, UI kits and web app concepts**. The community **likes**, **votes** and **downloads** them, and the best work wins daily, weekly and monthly awards. Think Awwwards crossed with Dribbble, except every entry comes with a downloadable file or a link to open it in Figma or Canva.
 
-Tagline: **"Where templates get their shot."**
+Tagline: **"For Devs by Devs."**
 
 ## Who uses it
 
@@ -35,7 +35,7 @@ Many users are on mid-range phones and slow connections, so mobile is a first-cl
 
 ### 1. Home `/`
 - Hero: **Template of the Day**, a full-bleed cover with title, creator, vote score and "View" / "Download" buttons, plus a countdown to the next award.
-- Category chip row: Websites · Mobile Apps · UI Kits · Components · Email · Presentations · Concepts
+- Category chip row: Websites · Mobile Apps · UI Kits · Components · Presentations · Concepts
 - Sections: **Trending now**, **Fresh this week**, **Top in Mobile App Designs**, **Rising creators** (creator cards with 3 mini thumbnails and a Follow button), **Honorable mentions**.
 - For logged-out visitors: a sign-up band. "Publish your work. Get voted. Get hired."
 

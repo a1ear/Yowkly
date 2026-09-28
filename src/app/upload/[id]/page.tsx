@@ -62,7 +62,7 @@ export default async function UploadStepPage(props: PageProps<'/upload/[id]'>) {
     published_at: null, created_at: new Date().toISOString(), owner_id: d.uid, owner_username: 'you', owner_display_name: 'You',
     owner_avatar_path: null, category_id: t.category_id, category_slug: category?.slug ?? null, category_name: category?.name ?? null,
     category_kind: category?.kind ?? null, parent_category_slug: null, like_count: 0, download_count: 0, save_count: 0,
-    comment_count: 0, view_count: 0, vote_count: 0, score: null, hot_score: 0, version: draft?.version ?? null,
+    comment_count: 0, view_count: 0, vote_count: 0, hot_score: 0, version: draft?.version ?? null,
     license_code: draft?.license_code ?? null, allows_commercial: null, tag_slugs: [],
     tags: tags.filter((g) => d.tagIds.includes(g.id)), tools: [...new Set([...d.files.map((f) => f.source_tool), ...d.links.map((l) => l.kind as Tool)])], award: null,
   };

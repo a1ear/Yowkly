@@ -32,8 +32,3 @@ export function mediaUrl(path: string, bucket: 'media' | 'avatars' = 'media') {
   if (bucket === 'media') return `${publicEnv.NEXT_PUBLIC_MEDIA_URL.replace(/\/$/, '')}/${path}`;
   return `${publicEnv.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}`;
 }
-
-/** Scores are shown only once a template has enough votes to mean something. */
-export const MIN_VOTES_FOR_SCORE = 5;
-export const showScore = (voteCount: number, score: number | null) =>
-  score != null && voteCount >= MIN_VOTES_FOR_SCORE;

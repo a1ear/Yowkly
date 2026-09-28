@@ -43,9 +43,7 @@ export async function getTemplateDetail(slug: string) {
     card.license_code
       ? db.from('licenses').select('code, name, url, summary, allows_commercial, requires_attribution').eq('code', card.license_code).single()
       : Promise.resolve({ data: null, error: null }),
-    db.from('template_stats')
-      .select('vote_count, weight_sum, design_sum, usability_sum, creativity_sum, code_sum, code_weight_sum')
-      .eq('template_id', card.id).single(),
+    db.from('template_stats').select('vote_count').eq('template_id', card.id).single(),
   ]);
   for (const r of [tpl, versions, files, links, media, comments, license, stats]) {
     if (r.error) throw new Error(`Failed to load template details: ${r.error.message}`);
@@ -62,24 +60,7 @@ export async function getTemplateDetail(slug: string) {
     media: media.data as TemplateMedia[],
     comments: comments.data as unknown as TemplateComment[],
     license: license.data as { code: string; name: string; url: string | null; summary: string; allows_commercial: boolean; requires_attribution: boolean } | null,
-    breakdown: toBreakdown(stats.data as StatsRow),
-  };
-}
-
-type StatsRow = {
-  vote_count: number; weight_sum: number; design_sum: number; usability_sum: number;
-  creativity_sum: number; code_sum: number; code_weight_sum: number;
-};
-export type Breakdown = { votes: number; design: number | null; usability: number | null; creativity: number | null; code: number | null };
-
-function toBreakdown(s: StatsRow): Breakdown {
-  const avg = (sum: number, w: number) => (Number(w) > 0 ? Math.round((Number(sum) / Number(w)) * 10) / 10 : null);
-  return {
-    votes: s.vote_count,
-    design: avg(s.design_sum, s.weight_sum),
-    usability: avg(s.usability_sum, s.weight_sum),
-    creativity: avg(s.creativity_sum, s.weight_sum),
-    code: avg(s.code_sum, s.code_weight_sum),
+    voteCount: (stats.data as { vote_count: number }).vote_count,
   };
 }
 

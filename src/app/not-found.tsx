@@ -14,7 +14,7 @@ export default function NotFound() {
       </form>
       <div className="flex gap-4 text-[14px]">
         <Link href="/" className="text-accent-ink underline-offset-4 hover:underline">Go home</Link>
-        <Link href="/awards" className="text-ink-2 underline-offset-4 hover:underline">See today&apos;s winner</Link>
+        <Link href="/ranking" className="text-ink-2 underline-offset-4 hover:underline">See today&apos;s winner</Link>
       </div>
     </div>
   );

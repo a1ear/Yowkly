@@ -33,7 +33,6 @@ export type TemplateCard = {
   comment_count: number;
   view_count: number;
   vote_count: number;
-  score: number | null;
   hot_score: number;
   version: string | null;
   license_code: string | null;
@@ -64,6 +63,8 @@ export type Creator = {
   awards: number;
   followers: number;
   following: number;
+  votes_received: number;
+  dev_awards: number;
 };
 
 export type License = {

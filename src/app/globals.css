@@ -87,12 +87,13 @@
   a { color: inherit; text-decoration: none; }
   button, input, textarea, select { font: inherit; color: inherit; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  input[type='search']::-webkit-search-cancel-button { appearance: none; }
   ::selection { background: var(--accent); color: var(--on-accent); }
 }
 
 @layer components {
   .btn {
-    @apply inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-md px-[18px] text-sm font-semibold tracking-[-0.005em] transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-md px-[18px] text-sm font-semibold tracking-[-0.005em] transition-[color,background-color,border-color,transform,filter] duration-150 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100;
   }
   .btn-primary { @apply bg-accent text-on-accent hover:brightness-95; }
   .btn-secondary { @apply border border-line bg-transparent text-ink hover:bg-surface-2; }
@@ -118,6 +119,102 @@
   .skeleton { @apply animate-pulse rounded-md bg-surface-2; }
 }
 
+/* ── Motion ─────────────────────────────────────────────────────────────
+   CSS only (no JS, no library). Everything here is switched off by the
+   prefers-reduced-motion block at the end of the file. */
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes word-rise {
+  from { opacity: 0; transform: translateY(0.4em) rotate(2deg); filter: blur(8px); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+@keyframes pop { 0% { transform: scale(1); } 40% { transform: scale(1.3); } 100% { transform: scale(1); } }
+@keyframes bit-spend {
+  0% { opacity: 0; transform: translateY(10px) scale(0.8); }
+  20% { opacity: 1; transform: translateY(0) scale(1.15); }
+  100% { opacity: 0; transform: translateY(-56px) scale(1); }
+}
+@keyframes hero-zoom { from { transform: scale(1.08); } to { transform: scale(1); } }
+@keyframes pulse-dot {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent); }
+  50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--accent) 0%, transparent); }
+}
+@keyframes glow-drift {
+  0% { transform: translate3d(-8%, -6%, 0) scale(1); }
+  50% { transform: translate3d(6%, 4%, 0) scale(1.15); }
+  100% { transform: translate3d(-8%, -6%, 0) scale(1); }
+}
+@keyframes icon-swap { from { opacity: 0; transform: rotate(-90deg) scale(0.6); } to { opacity: 1; transform: none; } }
+@keyframes float-card { 0%, 100% { translate: 0 0; } 50% { translate: 0 -10px; } }
+@keyframes sheen { from { transform: translateX(-120%) skewX(-20deg); } to { transform: translateX(220%) skewX(-20deg); } }
+
+@layer components {
+  /* Every route fades in (app/template.tsx re-mounts on navigation). */
+  .page-in { animation: fade-in 0.35s ease-out both; }
+  .rise { animation: rise 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+  .word-rise { animation: word-rise 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+  .count-pop { display: inline-block; animation: pop 0.45s ease-out; }
+  .like-pop { animation: pop 0.45s cubic-bezier(0.3, 1.6, 0.5, 1); }
+  .bit-spend { animation: bit-spend 1.1s ease-out forwards; }
+  .hero-zoom { animation: hero-zoom 1.8s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+  .pulse-dot { animation: pulse-dot 2.2s ease-in-out infinite; }
+  .icon-swap { animation: icon-swap 0.25s ease-out; }
+  .float-card { animation: float-card 6s ease-in-out infinite; }
+  .search-field { transition: width 0.3s cubic-bezier(0.2, 0.7, 0.2, 1), opacity 0.2s ease-out, padding 0.3s; }
+
+  /* Leaderboard rows cascade in. */
+  .rank-row { animation: rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+  .rank-row:nth-child(2) { animation-delay: 40ms; }
+  .rank-row:nth-child(3) { animation-delay: 80ms; }
+  .rank-row:nth-child(4) { animation-delay: 120ms; }
+  .rank-row:nth-child(5) { animation-delay: 160ms; }
+  .rank-row:nth-child(6) { animation-delay: 200ms; }
+  .rank-row:nth-child(7) { animation-delay: 240ms; }
+  .rank-row:nth-child(8) { animation-delay: 280ms; }
+  .rank-row:nth-child(9) { animation-delay: 320ms; }
+  .rank-row:nth-child(10) { animation-delay: 360ms; }
+
+  /* Card covers drift closer on hover. */
+  .card-hover > :first-child { transition: transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1); }
+  .group:hover .card-hover > :first-child, .card-hover:hover > :first-child { transform: scale(1.035); }
+
+  /* Nav underline grows from the left. */
+  .nav-link { position: relative; }
+  .nav-link::after {
+    content: ''; position: absolute; left: 0; right: 0; bottom: 8px; height: 1.5px; background: var(--accent);
+    transform: scaleX(0); transform-origin: left; transition: transform 0.25s ease-out;
+  }
+  .nav-link:hover::after { transform: scaleX(1); }
+
+  /* The two logo squares shift apart on hover. */
+  .logo-link svg rect { transition: transform 0.3s cubic-bezier(0.3, 1.6, 0.5, 1); }
+  .logo-link:hover svg rect:first-child { transform: translate(-1.5px, 1.5px); }
+  .logo-link:hover svg rect:last-child { transform: translate(1.5px, -1.5px); }
+
+  /* A light sweep across the vote button. */
+  .vote-cta { position: relative; overflow: hidden; }
+  .vote-cta::after {
+    content: ''; position: absolute; inset: 0; width: 40%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+    transform: translateX(-120%) skewX(-20deg);
+  }
+  .vote-cta:hover::after { animation: sheen 0.8s ease-out; }
+
+  /* Slow lime glow behind the welcome hero. */
+  .hero-glow::before {
+    content: ''; position: absolute; inset: -30% -10% auto auto; width: 70%; aspect-ratio: 1; border-radius: 50%;
+    background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 16%, transparent), transparent);
+    animation: glow-drift 16s ease-in-out infinite; pointer-events: none; z-index: -1;
+  }
+  .hero-glow { isolation: isolate; }
+}
+
+/* Scroll reveal where the browser supports scroll-driven animations; elsewhere content is simply there. */
+@supports (animation-timeline: view()) {
+  .reveal { animation: rise linear both; animation-timeline: view(); animation-range: entry 0% entry 45%; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+  .bit-spend { display: none; }
 }

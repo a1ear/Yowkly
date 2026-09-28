@@ -11,7 +11,7 @@ Status: **Plan v1 (pre-build)** · Stack: **Next.js + Supabase (Postgres, Auth, 
 
 ## 0. Name
 
-**Final: Yowkly** (by NightPatch). Tagline: *"Where templates get their shot."*
+**Final: Yowkly** (by NightPatch). Tagline: *"For Devs by Devs."* (was "Where templates get their shot.")
 
 - Two syllables, spelled the way it sounds, and easy to repeat after hearing it once.
 - A coined word, so it can be owned as a brand: a web search (2026-09-28) found no product, company or app using it.
@@ -159,14 +159,15 @@ Names considered and rejected during naming (conflicts found): Nightly, Varia, K
 | Table | Key columns | Notes |
 |---|---|---|
 | `likes` | `user_id`, `template_id`, `created_at` | PK (user, template). Toggle. |
-| `votes` | `user_id`, `template_id`, `design`, `usability`, `creativity`, `code_quality` (nullable), `score` (generated weighted avg), `weight` (1.0 default, juror 3.0), `created_at`, `updated_at` | Unique (user, template). Scores are 1–10 (CHECK). |
+| `votes` | `user_id`, `template_id`, `created_at` | PK (user, template). Final: no update/delete for clients; cast only through `cast_vote()`, which spends 1 yowkbit. |
+| `yowkbit_wallets` / `yowkbit_ledger` | balance (CHECK ≥ 0) / append-only `delta`, `reason`, `template_id` | Own rows readable; written only by triggers and `cast_vote()`. |
 | `follows` | `follower_id`, `followee_id` | CHECK follower ≠ followee. |
 | `collections` / `collection_items` | `id`, `owner_id`, `name`, `is_public` / `collection_id`, `template_id`, `note` | Private collections are visible to their owner only (RLS). |
 | `comments` | `id`, `template_id`, `author_id`, `parent_id` (one level of replies), `body` (≤ 2000 chars), `deleted_at` | Soft-delete keeps threads intact. |
 | `downloads` | `id`, `user_id` (nullable after account deletion), `template_id`, `version_id`, `file_id`, `license_code` (**snapshot**), `created_at` | Append-only. Records exactly what license the user got the file under. |
 | `template_view_daily` | `template_id`, `day`, `views` | Aggregated upserts via RPC. **No raw IPs are stored.** Dedupe happens in Redis for 24h. |
 | `notifications` | `id`, `user_id`, `type`, `actor_id`, `template_id`, `data jsonb`, `read_at` | Created by triggers. |
-| `awards` | `id`, `template_id`, `period` (`day`/`week`/`month`), `period_start`, `score_snapshot`, `created_at` | Immutable. The score is snapshotted at award time. |
+| `awards` / `dev_awards` | `template_id` or `user_id`, `period`/`week_start`, vote-count snapshots (`period_votes`) | Immutable. Counts are snapshotted when the winner is picked. |
 | `reports` | `id`, `reporter_id`, `target_type`, `target_id`, `reason`, `details`, `status`, `resolved_by` | |
 | `moderation_log` | `id`, `actor_id`, `action`, `target_type`, `target_id`, `reason`, `created_at` | **Append-only audit trail.** No UPDATE or DELETE for anyone. |
 | `user_affinity` | `user_id`, `tag_id`/`category_id`, `weight` | Maintained by triggers and cron. Feeds For You. |
@@ -177,7 +178,7 @@ Names considered and rejected during naming (conflicts found): Nightly, Varia, K
 - **Mobile app designs:** iOS · Android · Cross-platform, with sub-types Finance · Health · Social · Travel · Food · Productivity · E-commerce
 - **UI kits and design systems:** Component libraries · Design systems · Icon sets · Wireframe kits
 - **Components:** Navbars · Heroes · Pricing · Forms · Footers · Cards · Charts
-- **Other:** Email templates · Presentation / pitch decks · Web app concepts (idea showcases, which don't need a downloadable file)
+- **Other:** Presentation / pitch decks · Web app concepts (idea showcases, which don't need a downloadable file)
 - **Tags:** stack (HTML/CSS, React, Next.js, Vue, Svelte, Astro, Tailwind, Flutter, SwiftUI, React Native, Webflow, Framer), tool (Figma, Photoshop, Canva, Sketch, Illustrator, Penpot, XD), style (Minimal, Brutalist, Glassmorphism, Dark, Editorial, 3D, Retro)
 
 ### 3.4 Indexes (set these before the data grows)
@@ -293,28 +294,30 @@ GET /api/templates/{id}/download?file={fileId}
 
 ---
 
-## 7. Likes and voting
+## 7. Likes, votes and yowkbits
 
-The two systems are deliberately separate.
+The two systems are deliberately separate. *(Revised 2026-09-28: the 1–10 multi-criteria rating was replaced by yowkbit votes.)*
 
-| | **Like** ❤ | **Vote** ★ |
+| | **Like** ❤ | **Vote** ⬡ |
 |---|---|---|
-| Purpose | Quick appreciation, saves to your Liked tab | Considered judgement, which drives awards |
-| Action | One tap, toggle | Score 1–10 on each criterion |
-| Criteria | — | **Design** (40%) · **Usability** (30%) · **Creativity** (20%) · **Code quality** (10%, only for code templates; the others are re-weighted otherwise) |
-| Who | Any verified user | Verified email, account ≥ 7 days old, not the owner |
-| Shown as | Count | Average score (shown once there are ≥ 5 votes) + distribution |
+| Purpose | Quick appreciation, saves to your Liked tab | A deliberate pick that drives the **Ranking** |
+| Cost | Free, unlimited, undoable | **1 yowkbit**. Every account gets **100 yowkbits** at sign-up |
+| Limit | One per template (toggle) | One per template, **final** (no edits, no refunds) |
+| Who | Any verified user | Verified email, account ≥ 24 hours old, not the owner, balance ≥ 1 |
+| Shown as | Count | Count |
+
+**Ledger, not a counter.** `yowkbit_wallets.balance` has `CHECK (balance >= 0)` so overspending is impossible even under concurrent requests; every change is also written to the append-only `yowkbit_ledger` (`signup_grant +100`, `vote −1`), so a balance can always be explained. Clients can read their own wallet and ledger and nothing else; the only way to spend is `cast_vote()`, which locks the wallet, re-checks eligibility, inserts the vote, debits 1 and writes the ledger row in one transaction.
 
 **Anti-gaming**
-- Unique (user, template) constraints. Self-votes are blocked in RLS. A new-account age gate.
-- Rate limit: 60 likes / 10 min, 30 votes / hour.
-- Award ranking uses a **Bayesian average**, so 3 perfect votes cannot beat 200 strong ones: `(C·m + Σscore·w) / (C + Σw)`, with global mean `m` and `C = 10`.
-- Nightly cron flags anomalies (bursts of votes from accounts created the same day) for the moderator queue.
-- Jurors (phase 2) have `weight = 3.0`.
+- One vote per (user, template) (primary key). Self-votes, unverified and brand-new accounts are refused inside `cast_vote`.
+- Rate limit: 60 likes / 10 min, 30 votes / hour (edge + database).
+- Raw votes are private to the voter; the public sees counts. Live standings are aggregate-only functions (`ranking_templates`, `ranking_devs`).
+- Scarcity is the main defence: a throwaway account has at most 100 votes and can use only one per template.
 
-**Awards (pg_cron)**
-- **Template of the Day:** 00:00 UTC. The highest Bayesian score among templates published in the last 7 days with ≥ 10 votes. Month-level awards pick from daily winners.
-- Rows in `awards` are immutable and snapshot the score. The winner gets a badge on the card, a profile trophy and a notification.
+**Ranking (pg_cron, UTC)**
+- **Template of the Day / Week / Month:** most votes *received during* that day / ISO week / month (minimum 3 / 5 / 10). Ties go to whoever reached the count first. A template can take each spot once; the mobile-apps category also gets a weekly pick.
+- **Dev of the Week:** Monday 00:06 UTC, the creator whose published templates received the most votes that week (minimum 5), stored in `dev_awards`.
+- Winners are immutable rows that snapshot the vote counts. The winner gets a badge, a profile stat and a notification.
 
 ---
 
@@ -402,7 +405,7 @@ score(t, u) = 0.35 · affinity(u, t.tags ∪ t.category)   -- from likes/downloa
 | `/search?q=` | Search results + filters |
 | `/t/[slug]` | Template detail |
 | `/t/[slug]/v/[version]` | A specific version |
-| `/awards` | Day / Week / Month winners archive |
+| `/ranking` | Live weekly standings, Dev of the Week, Day / Week / Month winners (`/awards` redirects here) |
 | `/@[username]` | Public profile |
 | `/collections/[id]` | Collection |
 | `/upload` | Upload wizard (new template) |
@@ -483,6 +486,16 @@ Supabase Pro isn't affordable, so production runs at $0:
 - **The web app no longer uses the Supabase service-role key.** Draft deletions go through owner-checked functions that return the R2 keys to delete.
 - **Resumable (tus) uploads were dropped**: single signed uploads up to 200 MB. Multipart uploads can come back if large files often fail.
 - **Backups:** nightly `pg_dump` to R2 from GitHub Actions (Supabase Free has none). **Scan worker:** GitHub Actions every 30 minutes, or an always-free VM.
+
+### Yowkbits, Ranking and alpha prep (2026-09-28)
+- **Likes and votes separated for real:** votes now cost yowkbits (100 at sign-up, 1 per vote, one per template, final). The 1–10 rating, the Bayesian award formula and juror weighting were removed; the Ranking counts votes received in the period. See §7.
+- **Account age gate lowered from 7 days to 24 hours** so alpha testers can vote on day two; email verification + one vote per template + the 100-yowkbit cap carry the anti-abuse load.
+- **"Awards" renamed "Ranking"** (`/awards` → `/ranking`, permanent redirect). Database names (`awards`, `grant_award`) stay; users never see them.
+- **Dev of the Week** added (`dev_awards`, `grant_dev_of_week`, cron Monday 00:06 UTC).
+- **Email category removed** (migration refuses to run if anything still uses it).
+- **Demo seed data removed** for alpha: local and production both start empty.
+- Tagline is now **"For Devs by Devs."** Header search collapses to an icon (⌘K / Ctrl+K opens it). CSS-only motion (page fades, scroll reveal, vote/like feedback), all disabled under `prefers-reduced-motion`.
+- A vote uses `updateTag` (read-your-own-write), so the voter's next page load shows their vote immediately; likes still don't touch the cache.
 
 ## 16. Build status
 

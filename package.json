@@ -15,7 +15,6 @@
     "db:stop": "supabase stop",
     "db:reset": "supabase db reset",
     "db:types": "supabase gen types typescript --local > src/lib/database.types.ts",
-    "seed:storage": "node --env-file=.env.local scripts/seed-storage.mjs",
     "worker": "node --env-file=.env.local worker/scan.mjs",
     "check": "npm run lint && npm run typecheck && npm test"
   },

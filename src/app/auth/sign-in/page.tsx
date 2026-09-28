@@ -18,8 +18,9 @@ export default async function SignInPage(props: PageProps<'/auth/sign-in'>) {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
-        <h1 className="m-0 font-display text-5xl font-normal">Welcome back.</h1>
-        <p className="m-0 text-ink-2">Sign in to vote, save and download templates.</p>
+        <span className="eyebrow">Sign in</span>
+        <h1 className="m-0 font-display text-[44px] leading-none font-normal md:text-5xl">Welcome back.</h1>
+        <p className="m-0 text-ink-2">Your yowkbits, saves and downloads are waiting.</p>
       </div>
       {error && <p role="alert" className="m-0 rounded-md bg-surface-2 p-3 text-[13px] text-danger">{error}</p>}
       <OAuthButtons next={next} />

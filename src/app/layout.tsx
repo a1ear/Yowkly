@@ -13,7 +13,7 @@ const serif = Instrument_Serif({ subsets: ['latin'], weight: '400', style: ['nor
 
 export const metadata: Metadata = {
   metadataBase: new URL(publicEnv.NEXT_PUBLIC_SITE_URL),
-  title: { default: 'Yowkly — Where templates get their shot', template: '%s · Yowkly' },
+  title: { default: 'Yowkly — For Devs by Devs', template: '%s · Yowkly' },
   description:
     'Discover, vote on and download web templates, mobile app designs and UI kits from developers and designers. Figma, Photoshop, Canva, Sketch and code.',
   openGraph: { type: 'website', siteName: 'Yowkly' },

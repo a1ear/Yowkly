@@ -25,7 +25,7 @@ export function Countdown({ className = '' }: { className?: string }) {
   return (
     <span
       role="timer"
-      aria-label={now == null ? 'Next award countdown' : `Next award in ${h} hours ${m} minutes`}
+      aria-label={now == null ? 'Next ranking countdown' : `Next Template of the Day in ${h} hours ${m} minutes`}
       className={`font-mono tracking-[0.02em] tabular-nums ${className}`}
     >
       {now == null ? '--:--:--' : <>{pad(h)}<span className="text-ink-3">:</span>{pad(m)}<span className="text-ink-3">:</span>{pad(s)}</>}

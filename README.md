@@ -19,11 +19,10 @@ npm install
 npm run db:start          # starts local Supabase and applies migrations + seed
 npx supabase status       # copy API URL, anon key and service_role key
 cp .env.example .env.local  # paste the values in
-npm run seed:storage      # placeholder bytes for demo downloads (needs an R2 dev bucket, see .env.example)
 npm run dev               # http://localhost:3000
 ```
 
-Demo accounts are listed at the top of [supabase/seed.sql](supabase/seed.sql). Local email (sign-up confirmations, magic links) is visible at http://127.0.0.1:54324.
+The database starts empty (no demo content). Create accounts on the sign-up page; local email (sign-up confirmations, magic links) is visible at http://127.0.0.1:54324.
 
 To process uploads locally, run the scan worker in a second terminal:
 
@@ -47,7 +46,7 @@ With ClamAV available (`docker run -p 3310:3310 clamav/clamav`), set `CLAMD_HOST
 
 ```
 supabase/migrations/   schema, RLS, functions, read models, feed, awards, cron  ← the source of truth for permissions
-supabase/seed.sql      local demo data only
+supabase/seed.sql      intentionally empty (no demo content)
 src/app/               routes (pages, server actions, route handlers)
 src/app/actions/       every mutation: zod → rate limit → Supabase as the user (RLS decides)
 src/lib/data/          cached public reads and per-user reads

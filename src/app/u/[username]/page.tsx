@@ -21,7 +21,7 @@ export async function generateMetadata(props: PageProps<'/u/[username]'>): Promi
   };
 }
 
-const TABS = ['templates', 'collections', 'awards', 'about'] as const;
+const TABS = ['templates', 'collections', 'ranking', 'about'] as const;
 
 export default async function ProfilePage(props: PageProps<'/u/[username]'>) {
   const { username } = await props.params;
@@ -33,7 +33,7 @@ export default async function ProfilePage(props: PageProps<'/u/[username]'>) {
     getCreatorTemplates(c.id),
     publicClient([`creator:${c.username.toLowerCase()}`]).from('collections')
       .select('id, name, description, collection_items(count)').eq('owner_id', c.id).eq('is_public', true).order('created_at'),
-    tab === 'awards' ? getAwards() : Promise.resolve([]),
+    tab === 'ranking' ? getAwards() : Promise.resolve([]),
   ]);
   const myAwards = awards.filter((a) => a.template.owner_id === c.id);
   const cols = (collections.data ?? []) as { id: string; name: string; description: string | null; collection_items: { count: number }[] }[];
@@ -57,10 +57,10 @@ export default async function ProfilePage(props: PageProps<'/u/[username]'>) {
 
       {c.bio && <p className="m-0 mt-5 max-w-2xl text-[15px] text-ink-2">{c.bio}</p>}
 
-      <dl className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-5">
+      <dl className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         {[
           ['Templates', formatCount(c.template_count)], ['Downloads', formatCompact(c.downloads)],
-          ['Likes received', formatCompact(c.likes_received)], ['Awards', formatCount(c.awards)], ['Followers', formatCompact(c.followers)],
+          ['Votes received', formatCompact(c.votes_received)], ['Likes received', formatCompact(c.likes_received)], ['Top spots', formatCount(c.awards + c.dev_awards)], ['Followers', formatCompact(c.followers)],
         ].map(([k, v]) => (
           <div key={k} className="rounded-lg bg-surface-1 p-4 shadow-[inset_0_0_0_1px_var(--line)]">
             <dt className="eyebrow">{k}</dt>
@@ -96,13 +96,13 @@ export default async function ProfilePage(props: PageProps<'/u/[username]'>) {
           </ul>
         ) : <EmptyState title="No public collections" />)}
 
-        {tab === 'awards' && (myAwards.length ? (
+        {tab === 'ranking' && (myAwards.length ? (
           <ul className="m-0 grid list-none gap-6 p-0 sm:grid-cols-2 lg:grid-cols-4">
             {myAwards.map((a) => (
               <li key={a.id} className="flex flex-col gap-3"><AwardRibbon award={{ period: a.period, period_start: a.period_start, category: a.category?.name ?? null }} /><TemplateCard t={a.template} /></li>
             ))}
           </ul>
-        ) : <EmptyState title="No awards yet" body="Awards are decided by community votes every day, week and month." />)}
+        ) : <EmptyState title="Not ranked yet" body="The Ranking is decided by community votes every day, week and month." />)}
 
         {tab === 'about' && (
           <div className="flex max-w-2xl flex-col gap-4 text-ink-2">

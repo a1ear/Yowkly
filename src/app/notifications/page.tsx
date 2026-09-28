@@ -22,7 +22,9 @@ function describe(n: N): [IconName, React.ReactNode] {
     case 'like_milestone': return ['heart', <>{what} reached {String(n.data.count)} likes</>];
     case 'comment': return ['info', <>{who} commented on {what}</>];
     case 'reply': return ['info', <>{who} replied to your comment on {what}</>];
-    case 'award': return ['award', <>{what} won an award</>];
+    case 'award': return n.data.kind === 'dev_of_week'
+      ? ['award', <>You&apos;re Dev of the Week with {String(n.data.votes)} votes</>]
+      : ['award', <>{what} took a top spot in the Ranking</>];
     case 'upload_approved': return ['check', <>{what} was approved and is live</>];
     case 'upload_rejected': return ['alert', <>A moderator asked for changes to {what}: {String(n.data.reason ?? '')}</>];
     case 'template_removed': return ['x', <>{what} was removed: {String(n.data.reason ?? '')}</>];
@@ -55,7 +57,7 @@ export default async function NotificationsPage() {
         {items.some((n) => !n.read_at) && <MarkAllRead />}
       </div>
       <div className="mt-8 flex flex-col gap-8">
-        {items.length === 0 && <EmptyState title="All quiet" body="Follows, comments, awards and review results will show up here." />}
+        {items.length === 0 && <EmptyState title="All quiet" body="Follows, comments, rankings and review results will show up here." />}
         {groups.map(([label, list]) => list.length > 0 && (
           <section key={label} aria-labelledby={`g-${label}`}>
             <h2 id={`g-${label}`} className="eyebrow m-0 mb-3">{label}</h2>

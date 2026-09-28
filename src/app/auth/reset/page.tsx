@@ -8,7 +8,7 @@ export default function ResetPage() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
-        <h1 className="m-0 font-display text-5xl font-normal">Reset password</h1>
+        <h1 className="m-0 font-display text-[44px] leading-none font-normal md:text-5xl">Reset password</h1>
         <p className="m-0 text-ink-2">We&apos;ll email you a link to choose a new one.</p>
       </div>
       <ResetForm />

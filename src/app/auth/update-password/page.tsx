@@ -11,7 +11,7 @@ export default async function UpdatePasswordPage() {
   if (!data?.claims?.sub) redirect('/auth/reset');
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="m-0 font-display text-5xl font-normal">Choose a new password</h1>
+      <h1 className="m-0 font-display text-[44px] leading-none font-normal md:text-5xl">Choose a new password</h1>
       <UpdatePasswordForm />
     </div>
   );

@@ -5,12 +5,13 @@ import { useViewerState, type ViewerState } from './viewer-state';
 import { Icon } from '../icons';
 import { Dialog } from '../dialog';
 import { useToast } from '../toast';
-import { setFollow, setLike, submitVote, fileReport } from '@/app/actions/engagement';
+import { castVote, setFollow, setLike, fileReport } from '@/app/actions/engagement';
 import { createCollection, setInCollection } from '@/app/actions/collections';
 import { browserClient } from '@/lib/supabase/browser';
+import { YOWKBITS_EVENT } from '@/lib/events';
 import { formatBytes, formatCompact, formatCount, formatShortDate } from '@/lib/format';
-import { TOOL_LABEL, LICENSE_SHORT, MIN_VOTES_FOR_SCORE } from '@/lib/labels';
-import type { TemplateFile, TemplateVersion, Breakdown } from '@/lib/data/template';
+import { TOOL_LABEL, LICENSE_SHORT } from '@/lib/labels';
+import type { TemplateFile, TemplateVersion } from '@/lib/data/template';
 import type { License, LinkKind } from '@/lib/types';
 
 type Ctx = { state: ViewerState | null; set: (fn: (s: ViewerState) => ViewerState) => void; templateId: string; slug: string };
@@ -86,9 +87,9 @@ export function ActionRow({ likeCount, title }: { likeCount: number; title: stri
   return (
     <div className="flex flex-wrap items-center gap-2">
       <button type="button" onClick={toggleLike} disabled={pending || !state} aria-pressed={liked}
-              aria-label={`${liked ? 'Unlike' : 'Like'}, ${formatCount(likeCount + delta)} likes`}
+              aria-label={`${liked ? 'Unlike' : 'Like'}, ${formatCount(likeCount + delta)} like${likeCount + delta === 1 ? '' : 's'}`}
               className={`btn btn-secondary h-10 px-3.5 ${liked ? 'text-accent-ink' : ''}`}>
-        <Icon name="heart" size={17} filled={liked} className={`shrink-0 transition-transform ${liked ? 'scale-110' : ''}`} />
+        <Icon key={String(liked)} name="heart" size={17} filled={liked} className={`shrink-0 ${liked ? 'like-pop' : ''}`} />
         <span className="font-mono text-[13px]">{formatCompact(likeCount + delta)}</span>
       </button>
       <button type="button" onClick={() => (state?.uid ? setSaveOpen(true) : (window.location.href = signInHref(slug)))}
@@ -347,100 +348,75 @@ export function DownloadPanel({ versions, files, currentVersionId, licenses, lin
 }
 
 // ─────────────────────────────────────────────────────────── vote
-type Criterion = 'design' | 'usability' | 'creativity' | 'code_quality';
-const CRITERIA: [Criterion, string][] = [['design', 'Design'], ['usability', 'Usability'], ['creativity', 'Creativity'], ['code_quality', 'Code quality']];
-
-export function VoteModule({ score, breakdown, hasCode }: { score: number | null; breakdown: Breakdown; hasCode: boolean }) {
+export function VoteModule({ voteCount }: { voteCount: number }) {
   const { state, set, templateId, slug } = useViewer();
   const toast = useToast();
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<Partial<Record<Criterion, number>>>({});
+  const [count, setCount] = useState(voteCount);
+  const [confirming, setConfirming] = useState(false);
+  const [spent, setSpent] = useState(0); // bumps to replay the "-1" animation
   const [pending, start] = useTransition();
-  const criteria = CRITERIA.filter(([k]) => hasCode || k !== 'code_quality');
-  const complete = criteria.every(([k]) => draft[k]);
-  const shown = breakdown.votes >= MIN_VOTES_FOR_SCORE && score != null;
-  const avgs: Record<Criterion, number | null> = { design: breakdown.design, usability: breakdown.usability, creativity: breakdown.creativity, code_quality: breakdown.code };
 
-  const startEdit = () => {
-    const v = state?.vote;
-    setDraft(v ? { design: v.design, usability: v.usability, creativity: v.creativity, code_quality: v.code_quality ?? undefined } : {});
-    setEditing(true);
-  };
-  const submit = () => start(async () => {
-    const r = await submitVote({
-      templateId, design: draft.design!, usability: draft.usability!, creativity: draft.creativity!,
-      codeQuality: hasCode ? draft.code_quality ?? null : null,
-    });
-    if (!r.ok) return toast({ text: r.error, tone: 'error' });
-    set((s) => ({ ...s, vote: { design: draft.design!, usability: draft.usability!, creativity: draft.creativity!, code_quality: draft.code_quality ?? null, updated_at: new Date().toISOString() } }));
-    setEditing(false);
-    toast({ text: r.data.updated ? 'Vote updated.' : 'Your vote is in. Thanks for rating.', tone: 'ok' });
+  const vote = () => start(async () => {
+    const r = await castVote(templateId);
+    setConfirming(false);
+    if (!r.ok) {
+      if (r.code === 'voted' || r.code === 'no_bits') set((s) => ({ ...s, eligibility: r.code as ViewerState['eligibility'] }));
+      return toast({ text: r.error, tone: 'error' });
+    }
+    setCount(r.data.voteCount);
+    setSpent((n) => n + 1);
+    set((s) => ({ ...s, vote: { created_at: new Date().toISOString() }, balance: r.data.balance, eligibility: 'voted' }));
+    window.dispatchEvent(new CustomEvent(YOWKBITS_EVENT, { detail: r.data.balance }));
+    toast({ text: `Vote cast. ${r.data.balance} yowkbit${r.data.balance === 1 ? '' : 's'} left.`, tone: 'ok' });
   });
 
   return (
-    <section aria-labelledby="vote-title" className="flex flex-col gap-4 rounded-xl bg-surface-1 p-5 shadow-[inset_0_0_0_1px_var(--line)]">
-      <div className="flex items-baseline justify-between">
-        <h2 id="vote-title" className="m-0 text-base font-semibold">Community score</h2>
-        <span className="font-mono text-xs text-ink-3">{formatCount(breakdown.votes)} vote{breakdown.votes === 1 ? '' : 's'}{!hasCode ? ' · design-only' : ''}</span>
+    <section aria-labelledby="vote-title" className="vote-panel relative flex flex-col gap-4 overflow-hidden rounded-xl bg-surface-1 p-5 shadow-[inset_0_0_0_1px_var(--line)]">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 id="vote-title" className="m-0 text-base font-semibold">Votes</h2>
+        <Link href="/ranking" className="text-[12.5px] text-ink-3 hover:text-accent-ink">Counts toward the Ranking</Link>
       </div>
-      {shown ? (
-        <div className="flex items-center gap-5">
-          <span className="font-display text-[56px] leading-none">{Number(score).toFixed(1)}</span>
-          <dl className="m-0 grid flex-1 gap-1.5">
-            {criteria.map(([k, label]) => (
-              <div key={k} className="grid grid-cols-[88px_1fr_28px] items-center gap-2 text-[12.5px]">
-                <dt className="text-ink-2">{label}</dt>
-                <dd className="m-0 h-1.5 overflow-hidden rounded-full bg-surface-3" aria-hidden="true">
-                  <span className="block h-full rounded-full bg-accent" style={{ width: `${((avgs[k] ?? 0) / 10) * 100}%` }} />
-                </dd>
-                <dd className="m-0 text-right font-mono">{avgs[k]?.toFixed(1) ?? '—'}</dd>
-              </div>
-            ))}
-          </dl>
-        </div>
-      ) : (
+      <div className="flex items-center gap-4">
+        <span key={count} className="count-pop font-display text-[56px] leading-none" aria-live="polite">{formatCount(count)}</span>
         <p className="m-0 text-[13px] text-ink-2">
-          <span className="mr-2 font-display text-4xl text-ink-3">—</span>
-          Score appears after {MIN_VOTES_FOR_SCORE} votes. {breakdown.votes} so far.
+          Every vote costs its voter 1 yowkbit, so each one means something. Likes are free and don&apos;t affect the Ranking.
         </p>
+      </div>
+      {spent > 0 && (
+        <span key={spent} aria-hidden="true" className="bit-spend pointer-events-none absolute right-6 bottom-16 inline-flex items-center gap-1 font-mono text-sm font-semibold text-accent-ink">
+          <Icon name="bit" size={16} strokeWidth={2} />−1
+        </span>
       )}
 
-      <div className="border-t border-line pt-4">
-        {!state && <div className="skeleton h-10" />}
+      <div className="border-t border-line pt-4 text-[13px]">
+        {!state && <div className="skeleton h-12" />}
         {state?.eligibility === 'auth' && <Link href={signInHref(slug)} className="btn btn-secondary w-full">Sign in to vote</Link>}
-        {state?.eligibility === 'own' && <p className="m-0 text-[13px] text-ink-2">You can&apos;t vote on your own work. Share it to collect votes.</p>}
-        {state?.eligibility === 'too_new' && <p className="m-0 text-[13px] text-ink-2">New accounts can vote after 7 days. It keeps the awards fair.</p>}
-        {state?.eligibility === 'unverified' && <p className="m-0 text-[13px] text-ink-2">Verify your email address to vote.</p>}
-        {state?.eligibility === 'ok' && state.vote && !editing && (
-          <div className="flex items-center justify-between gap-3 text-[13px] text-ink-2" role="status">
-            <span>You rated this on {formatShortDate(state.vote.updated_at)}.</span>
-            <button type="button" onClick={startEdit} className="btn btn-secondary h-9 px-3">Edit your vote</button>
+        {state?.eligibility === 'own' && <p className="m-0 text-ink-2">You can&apos;t vote on your own work. Share it to collect votes.</p>}
+        {state?.eligibility === 'too_new' && <p className="m-0 text-ink-2">New accounts can vote 24 hours after signing up. It keeps the Ranking fair.</p>}
+        {state?.eligibility === 'unverified' && <p className="m-0 text-ink-2">Verify your email address to vote.</p>}
+        {state?.eligibility === 'not_published' && <p className="m-0 text-ink-2">Voting opens once this template is published.</p>}
+        {state?.eligibility === 'no_bits' && <p className="m-0 text-ink-2">You&apos;ve spent all your yowkbits. Likes and saves are still free.</p>}
+        {state?.eligibility === 'voted' && (
+          <p className="m-0 flex items-center gap-2 text-ink-2" role="status">
+            <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-accent text-on-accent"><Icon name="check" size={14} strokeWidth={2.4} /></span>
+            You voted for this{state.vote ? ` on ${formatShortDate(state.vote.created_at)}` : ''}. Votes are final.
+          </p>
+        )}
+        {state?.eligibility === 'ok' && !confirming && (
+          <div className="flex flex-col gap-2">
+            <button type="button" onClick={() => setConfirming(true)} className="btn btn-primary btn-lg vote-cta w-full">
+              <Icon name="bit" size={18} strokeWidth={2} />Vote · 1 yowkbit
+            </button>
+            <p className="m-0 text-center text-ink-3">You have <span className="font-mono text-ink">{state.balance}</span> yowkbit{state.balance === 1 ? '' : 's'}.</p>
           </div>
         )}
-        {state?.eligibility === 'ok' && (!state.vote || editing) && (
-          <div className="flex flex-col gap-3.5">
-            <h3 className="m-0 text-sm font-semibold">Your vote</h3>
-            {criteria.map(([k, label]) => (
-              <fieldset key={k} className="m-0 flex flex-col gap-1.5 border-0 p-0">
-                <legend className="mb-1.5 flex w-full justify-between text-[13px]">
-                  <span>{label}</span><span className="font-mono text-ink-3">{draft[k] ?? '–'}</span>
-                </legend>
-                <div className="grid grid-cols-10 gap-1">
-                  {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
-                    <label key={n} className="relative">
-                      <input type="radio" name={`vote-${k}`} value={n} checked={draft[k] === n} className="peer sr-only"
-                             onChange={() => setDraft((d) => ({ ...d, [k]: n }))} />
-                      <span className={`flex h-9 cursor-pointer items-center justify-center rounded-sm font-mono text-xs transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-accent ${
-                        draft[k] && n <= draft[k]! ? 'bg-accent text-on-accent' : 'bg-surface-2 text-ink-2 hover:bg-surface-3'}`}>{n}</span>
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
-            ))}
+        {state?.eligibility === 'ok' && confirming && (
+          <div className="flex flex-col gap-3" role="group" aria-labelledby="vote-confirm">
+            <p id="vote-confirm" className="m-0 text-ink">Spend 1 of your {state.balance} yowkbits on this template? Votes are final.</p>
             <div className="flex gap-2">
-              {editing && <button type="button" className="btn btn-ghost" onClick={() => setEditing(false)}>Cancel</button>}
-              <button type="button" disabled={!complete || pending} onClick={submit} className="btn btn-primary flex-1">
-                {complete ? (pending ? 'Submitting…' : 'Submit vote') : `Rate all ${criteria.length} to submit`}
+              <button type="button" className="btn btn-ghost" onClick={() => setConfirming(false)} disabled={pending}>Cancel</button>
+              <button type="button" className="btn btn-primary flex-1" onClick={vote} disabled={pending} autoFocus>
+                {pending ? 'Voting…' : 'Confirm vote'}
               </button>
             </div>
           </div>

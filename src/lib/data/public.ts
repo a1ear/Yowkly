@@ -47,7 +47,7 @@ export async function getHome() {
   const [trending, fresh, mobile, todRes, creators] = await Promise.all([
     cards().order('hot_score', { ascending: false }).order('published_at', { ascending: false }).limit(8),
     cards().gte('published_at', weekAgo).order('published_at', { ascending: false }).limit(8),
-    cards().eq('parent_category_slug', 'mobile-apps').order('score', { ascending: false, nullsFirst: false }).limit(3),
+    cards().eq('parent_category_slug', 'mobile-apps').order('vote_count', { ascending: false }).order('published_at', { ascending: false }).limit(3),
     db.from('awards').select('template_id, period_start').eq('period', 'day').is('category_id', null)
       .order('period_start', { ascending: false }).limit(1),
     publicClient(['creators']).from('creator_stats').select('*').gt('template_count', 0)
@@ -98,7 +98,7 @@ export async function exploreTemplates(p: ExploreParams) {
   const order = {
     trending: ['hot_score', false],
     newest: ['published_at', false],
-    top: ['score', false],
+    top: ['vote_count', false],
     downloads: ['download_count', false],
   } as const;
   const [col, asc] = order[p.sort];
@@ -109,20 +109,57 @@ export async function exploreTemplates(p: ExploreParams) {
   return { rows, total: res.count ?? rows.length, hasMore: rows.length === PAGE_SIZE };
 }
 
-// ── Awards ────────────────────────────────────────────────────────────
-export async function getAwards() {
+// ── Ranking ───────────────────────────────────────────────────────────
+export type AwardRow = {
+  id: string; template_id: string; period: 'day' | 'week' | 'month'; period_start: string;
+  score_snapshot: number | null; vote_count_snapshot: number; period_votes: number | null;
+  blurb: string | null; category: { name: string } | null; template: TemplateCard;
+};
+
+/** Past winners (Template of the Day / Week / Month), newest first. */
+export async function getAwards(): Promise<AwardRow[]> {
   const db = publicClient(['awards']);
   const res = await db.from('awards')
-    .select('id, template_id, period, period_start, score_snapshot, vote_count_snapshot, blurb, category:categories(name)')
+    .select('id, template_id, period, period_start, score_snapshot, vote_count_snapshot, period_votes, blurb, category:categories(name)')
     .order('period_start', { ascending: false }).limit(60);
-  const awards = unwrap<{
-    id: string; template_id: string; period: 'day' | 'week' | 'month'; period_start: string;
-    score_snapshot: number; vote_count_snapshot: number; blurb: string | null; category: { name: string } | null;
-  }[]>(res, 'awards');
+  const awards = unwrap<Omit<AwardRow, 'template'>[]>(res, 'awards');
   const cardsById = new Map((await getCardsByIds([...new Set(awards.map((a) => a.template_id))])).map((c) => [c.id, c]));
   return awards
     .map((a) => ({ ...a, template: cardsById.get(a.template_id) }))
-    .filter((a): a is typeof a & { template: TemplateCard } => Boolean(a.template));
+    .filter((a): a is AwardRow => Boolean(a.template));
+}
+
+async function getCreatorsByIds(ids: string[]): Promise<Creator[]> {
+  if (!ids.length) return [];
+  const res = await publicClient(['creators']).from('creator_stats').select('*').in('id', ids);
+  const rows = unwrap<Creator[]>(res, 'creators');
+  return ids.map((id) => rows.find((r) => r.id === id)).filter((r): r is Creator => Boolean(r));
+}
+
+/** Live standings for this week (votes so far) plus past Dev of the Week winners. */
+export async function getRanking() {
+  const db = publicClient(['awards', 'ranking'], 60);
+  const [awards, devRes, weekRes, devLiveRes] = await Promise.all([
+    getAwards(),
+    db.from('dev_awards').select('id, user_id, week_start, vote_count, template_count').order('week_start', { ascending: false }).limit(12),
+    db.rpc('ranking_templates', { p_period: 'week', p_limit: 10 }),
+    db.rpc('ranking_devs', { p_limit: 5 }),
+  ]);
+  const devAwards = unwrap<{ id: string; user_id: string; week_start: string; vote_count: number; template_count: number }[]>(devRes, 'dev awards');
+  const week = unwrap<{ template_id: string; votes: number }[]>(weekRes, 'weekly ranking');
+  const devLive = unwrap<{ user_id: string; votes: number; templates: number }[]>(devLiveRes, 'dev ranking');
+  const [weekCards, creators] = await Promise.all([
+    getCardsByIds(week.map((w) => w.template_id)),
+    getCreatorsByIds([...new Set([...devAwards.map((d) => d.user_id), ...devLive.map((d) => d.user_id)])]),
+  ]);
+  const cardById = new Map(weekCards.map((c) => [c.id, c]));
+  const creatorById = new Map(creators.map((c) => [c.id, c]));
+  return {
+    awards,
+    weekTemplates: week.flatMap((w) => (cardById.has(w.template_id) ? [{ votes: w.votes, template: cardById.get(w.template_id)! }] : [])),
+    weekDevs: devLive.flatMap((d) => (creatorById.has(d.user_id) ? [{ ...d, creator: creatorById.get(d.user_id)! }] : [])),
+    devAwards: devAwards.flatMap((d) => (creatorById.has(d.user_id) ? [{ ...d, creator: creatorById.get(d.user_id)! }] : [])),
+  };
 }
 
 // ── Creators ──────────────────────────────────────────────────────────

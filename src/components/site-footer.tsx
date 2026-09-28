@@ -4,9 +4,9 @@ import { Logo } from './icons';
 const COLUMNS: [string, [string, string][]][] = [
   ['Categories', [
     ['/c/websites', 'Websites'], ['/c/mobile-apps', 'Mobile Apps'], ['/c/ui-kits', 'UI Kits'],
-    ['/c/components', 'Components'], ['/c/email', 'Email'], ['/c/presentations', 'Presentations'], ['/c/concepts', 'Concepts'],
+    ['/c/components', 'Components'], ['/c/presentations', 'Presentations'], ['/c/concepts', 'Concepts'],
   ]],
-  ['Yowkly', [['/awards', 'Awards'], ['/legal/licenses', 'Licenses explained'], ['/legal/upload-guidelines', 'Upload guidelines']]],
+  ['Yowkly', [['/ranking', 'Ranking'], ['/legal/licenses', 'Licenses explained'], ['/legal/upload-guidelines', 'Upload guidelines']]],
   ['Legal', [['/legal/terms', 'Terms'], ['/legal/privacy', 'Privacy'], ['/legal/dmca', 'DMCA']]],
 ];
 
@@ -19,7 +19,7 @@ export function SiteFooter() {
             <Logo />
             <span className="font-display text-[26px] leading-none">Yowkly</span>
           </Link>
-          <p className="m-0 text-ink-2">Where templates get their shot.</p>
+          <p className="m-0 text-ink-2">For Devs by Devs.</p>
           <p className="m-0 text-[13px] text-ink-3">© {new Date().getFullYear()} Yowkly · by NightPatch</p>
         </div>
         {COLUMNS.map(([title, links]) => (

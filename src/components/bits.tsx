@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { Icon } from './icons';
 import { formatCount, hash, initials } from '@/lib/format';
-import { awardLabel, LICENSE_SHORT, mediaUrl, showScore } from '@/lib/labels';
+import { awardLabel, LICENSE_SHORT, mediaUrl } from '@/lib/labels';
 import type { Award } from '@/lib/types';
 
 const AVATAR_FILLS = ['#E8B89A', '#A8C5E8', '#C9E8A8', '#E8D8A8', '#D7B8E8', '#A8E8D8'];
@@ -41,19 +41,15 @@ export function LicensePill({ code }: { code: string | null }) {
   );
 }
 
-export function Stats({ score, votes, likes, downloads, size = 'sm' }: { score: number | null; votes: number; likes: number; downloads: number; size?: 'sm' | 'md' }) {
+/** Votes (paid in yowkbits, drive the Ranking) are shown apart from likes (free). */
+export function Stats({ votes, likes, downloads, size = 'sm' }: { votes: number; likes: number; downloads: number; size?: 'sm' | 'md' }) {
   return (
     <div className={`flex items-center gap-3 font-mono text-ink-3 ${size === 'md' ? 'text-[13px]' : 'text-xs'}`}>
-      {showScore(votes, score) ? (
-        <span className="inline-flex items-center gap-1 text-ink" aria-label={`Score ${score} from ${votes} votes`}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="var(--accent)" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" aria-hidden="true"><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5-4.8-4.6 6.6-.9z" /></svg>
-          {Number(score).toFixed(1)}
-        </span>
-      ) : (
-        <span className="text-ink-2">New</span>
-      )}
-      <span className="inline-flex items-center gap-1" aria-label={`${formatCount(likes)} likes`}><Icon name="heart" size={12} strokeWidth={2} />{formatCount(likes)}</span>
-      <span className="inline-flex items-center gap-1" aria-label={`${formatCount(downloads)} downloads`}><Icon name="download" size={12} strokeWidth={2} />{formatCount(downloads)}</span>
+      <span className={`inline-flex items-center gap-1 ${votes > 0 ? 'text-accent-ink' : ''}`} aria-label={`${formatCount(votes)} vote${votes === 1 ? '' : 's'}`}>
+        <Icon name="bit" size={12} strokeWidth={2} />{formatCount(votes)}
+      </span>
+      <span className="inline-flex items-center gap-1" aria-label={`${formatCount(likes)} like${likes === 1 ? '' : 's'}`}><Icon name="heart" size={12} strokeWidth={2} />{formatCount(likes)}</span>
+      <span className="inline-flex items-center gap-1" aria-label={`${formatCount(downloads)} download${downloads === 1 ? '' : 's'}`}><Icon name="download" size={12} strokeWidth={2} />{formatCount(downloads)}</span>
     </div>
   );
 }
