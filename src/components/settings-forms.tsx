@@ -1,5 +1,7 @@
 'use client';
-import { useActionState } from 'react';
+import { useActionState, useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useUnsavedGuard } from '@/lib/use-unsaved-guard';
 import { updateProfile, deleteAccount } from '@/app/actions/profile';
 import Link from 'next/link';
 import { Icon } from './icons';
@@ -20,10 +22,36 @@ function Text({ label, name, initial, hint, ...rest }: { label: string; name: st
   );
 }
 
+/** Everything the form would submit, as one comparable string. */
+function snapshot(form: HTMLFormElement) {
+  return JSON.stringify([...new FormData(form).entries()].map(([k, v]) => [k, String(v)]));
+}
+
 export function ProfileForm({ profile: p }: { profile: Profile }) {
   const [state, action, pending] = useActionState(updateProfile, null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const saved = useRef<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const router = useRouter();
+  useUnsavedGuard(dirty && !pending);
+
+  // Remember what's saved: on first render, and again after each successful save.
+  useEffect(() => {
+    if (formRef.current && (saved.current === null || state?.ok)) {
+      saved.current = snapshot(formRef.current);
+      setDirty(false);
+      // Re-read the profile so "Discard" later resets to what was just saved.
+      if (state?.ok) router.refresh();
+    }
+  }, [state, router]);
+  const check = () => formRef.current && setDirty(snapshot(formRef.current) !== saved.current);
+  const discard = () => {
+    formRef.current?.reset();
+    setDirty(false);
+  };
+
   return (
-    <form action={action} className="flex flex-col gap-5">
+    <form ref={formRef} id="profile-form" action={action} onInput={check} onChange={check} className="flex flex-col gap-5">
       <div className="grid gap-4 sm:grid-cols-2">
         <Text label="Display name" name="displayName" initial={p.display_name} required maxLength={60} />
         <Text label="Username" name="username" initial={p.username} required pattern="[A-Za-z0-9_]{3,30}" hint="Changing it changes your profile URL." />
@@ -60,6 +88,15 @@ export function ProfileForm({ profile: p }: { profile: Profile }) {
       {state?.error && <p role="alert" className="m-0 flex items-center gap-2 text-danger"><Icon name="alert" size={16} />{state.error}</p>}
       {state?.ok && <p role="status" className="m-0 flex items-center gap-2 text-success"><Icon name="check" size={16} />Saved.</p>}
       <button className="btn btn-primary self-start" disabled={pending}>{pending ? 'Saving…' : 'Save profile'}</button>
+
+      {dirty && (
+        <div role="status" className="rise fixed inset-x-3 bottom-[76px] z-50 mx-auto flex max-w-xl items-center gap-3 rounded-xl bg-surface-2 p-3 pl-4 shadow-[inset_0_0_0_1px_var(--line),var(--shadow-e2)] md:bottom-5">
+          <span className="h-2 w-2 shrink-0 rounded-full bg-warning" aria-hidden="true" />
+          <span className="flex-1 text-[13.5px] text-ink">You have unsaved changes</span>
+          <button type="button" onClick={discard} className="btn btn-ghost h-10 px-3">Discard</button>
+          <button type="submit" disabled={pending} className="btn btn-primary h-10">{pending ? 'Saving…' : 'Save changes'}</button>
+        </div>
+      )}
     </form>
   );
 }

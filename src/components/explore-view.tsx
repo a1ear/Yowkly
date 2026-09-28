@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { exploreTemplates, getCategories, getTagsByType, SORTS, type ExploreParams } from '@/lib/data/public';
+import { exploreTemplates, getCategories, getTagsByType, searchCreators, SORTS, type ExploreParams } from '@/lib/data/public';
+import { CreatorResults } from './creator-results';
 import { TemplateCard } from './template-card';
 import { EmptyState } from './bits';
 import { Icon } from './icons';
@@ -25,8 +26,10 @@ function href(base: string, p: ExploreParams, patch: Partial<Record<keyof Explor
 export async function ExploreView({ params, base, title, description }: {
   params: ExploreParams; base: string; title: string; description?: string | null;
 }) {
-  const [{ rows, total, hasMore }, categories, tags] = await Promise.all([
+  const [{ rows, total, hasMore }, categories, tags, creators] = await Promise.all([
     exploreTemplates(params), getCategories(), getTagsByType(),
+    // People are searchable too: creators come first on the first page of a search.
+    params.q && params.page === 1 ? searchCreators(params.q, 6) : Promise.resolve([]),
   ]);
   const top = categories.filter((c) => !c.parent_id);
   const stacks = tags.filter((t) => t.type === 'stack');
@@ -114,6 +117,9 @@ export async function ExploreView({ params, base, title, description }: {
               <Link href={base} className="ml-1 text-[13px] text-ink-2 underline-offset-4 hover:underline">Clear all</Link>
             </div>
           )}
+
+          {creators.length > 0 && <CreatorResults creators={creators} query={params.q ?? ''} />}
+          {creators.length > 0 && <h2 className="m-0 -mb-2 text-lg font-semibold">Templates</h2>}
 
           {rows.length === 0 ? (
             <EmptyState

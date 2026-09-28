@@ -32,7 +32,8 @@ export function timeAgo(d: string | Date, now = Date.now()) {
 }
 
 export function initials(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
+  // Words are runs of letters/digits, so "Friend (Test)" gives "FT", not "F(".
+  const parts = name.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
   return ((parts[0]?.[0] ?? '') + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase() || '?';
 }
 

@@ -170,6 +170,14 @@ export async function getCreator(username: string) {
   return unwrap<Creator | null>(res, 'creator');
 }
 
+/** Creators whose username, name or skills match (search_creators escapes wildcards). */
+export async function searchCreators(q: string, limit = 8): Promise<Creator[]> {
+  const term = q.trim();
+  if (term.replace(/^@/, '').length < 2) return [];
+  const res = await publicClient(['creators']).rpc('search_creators', { p_q: term, p_limit: limit });
+  return unwrap<Creator[]>(res, 'creators');
+}
+
 export async function getCreatorTemplates(ownerId: string, limit = 24) {
   const res = await cards().eq('owner_id', ownerId).order('published_at', { ascending: false }).limit(limit);
   return unwrap<TemplateCard[]>(res, 'creator templates');

@@ -2,6 +2,7 @@
 import { revalidateTag, updateTag } from 'next/cache';
 import { z } from 'zod';
 import { authed, fail, toUserError, type ActionResult } from '@/lib/actions';
+import { userClient } from '@/lib/supabase/clients';
 import { templateTag } from '@/lib/data/template';
 
 const uuid = z.uuid();
@@ -48,6 +49,21 @@ export async function castVote(templateId: string): Promise<ActionResult<{ balan
   // Read-your-own-write: the voter's next page load must show their vote, not a stale count.
   updateTag(templateTag(templateId));
   return { ok: true, data: { balance: row.balance, voteCount: row.vote_count } };
+}
+
+/**
+ * Which of these creators the signed-in user follows (for Follow buttons in
+ * search results). No rate limit: read-only, and RLS scopes it to the caller.
+ */
+export async function followStates(userIds: string[]): Promise<{ me: string | null; following: string[] }> {
+  const ids = z.array(uuid).max(24).safeParse(userIds);
+  if (!ids.success) return { me: null, following: [] };
+  const db = await userClient();
+  const { data } = await db.auth.getClaims();
+  const me = (data?.claims?.sub as string | undefined) ?? null;
+  if (!me || !ids.data.length) return { me, following: [] };
+  const { data: rows } = await db.from('follows').select('followee_id').eq('follower_id', me).in('followee_id', ids.data);
+  return { me, following: ((rows ?? []) as { followee_id: string }[]).map((r) => r.followee_id) };
 }
 
 export async function setFollow(userId: string, follow: boolean): Promise<ActionResult<{ following: boolean }>> {

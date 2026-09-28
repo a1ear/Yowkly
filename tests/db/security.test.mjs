@@ -469,6 +469,32 @@ test('ranking: most votes in the period wins, with a minimum, once per template'
   assert.equal(pub.length, 1, 'winners are public');
 });
 
+test('template limit: 7 per account, enforced in the database, freed by deleting a draft', async () => {
+  const maker = await createUser(db, { email: 'limit@test.dev' });
+  const mk = (n) => as(db, maker, `select template_id from public.create_template($1, $2::smallint)`, [`Limit test ${n}`, s.websites]);
+  const ids = [];
+  for (let i = 1; i <= 7; i++) ids.push(ok(await mk(i))[0].template_id);
+  fails(await mk(8), /up to 7 templates/, 'eighth template');
+  const [slots] = ok(await as(db, maker, `select * from public.my_template_slots()`));
+  assert.deepEqual({ ...slots }, { used: 7, max: 7, unlimited: false });
+  ok(await as(db, maker, `delete from public.templates where id = $1`, [ids[0]]));
+  ok(await mk(9), 'a deleted draft frees its slot');
+  fails(await as(db, maker, `insert into public.templates (owner_id, slug, title) values ($1, 'sneak-8', 'Sneak')`, [maker]),
+        /permission denied/, 'no way around create_template');
+});
+
+test('creator search: finds by name, username or skill; wildcards are literal', async () => {
+  const dev = await createUser(db, { email: 'zed@test.dev', meta: { user_name: 'zed_builds', full_name: 'Zed Okafor' } });
+  await db.query(`update public.profiles set skills = '{Flutter,Motion}' where id = $1`, [dev]);
+  const find = async (q) => ok(await as(db, null, `select username from public.search_creators($1, 24)`, [q])).map((r) => r.username);
+  assert.ok((await find('okafor')).includes('zed_builds'), 'display name');
+  assert.ok((await find('@zed_b')).includes('zed_builds'), 'username with @');
+  assert.ok((await find('flutter')).includes('zed_builds'), 'skill');
+  assert.deepEqual(await find('%%'), [], '% is not a wildcard');
+  assert.ok(!(await find('z_d')).includes('zed_builds'), '_ is not a wildcard (would match "zed")');
+  assert.deepEqual(await find('z'), [], 'at least 2 characters');
+});
+
 test('live standings expose counts, never voters', async () => {
   const rows = ok(await as(db, null, `select * from public.ranking_templates('week', 5)`));
   for (const r of rows) assert.deepEqual(Object.keys(r).sort(), ['template_id', 'votes']);
