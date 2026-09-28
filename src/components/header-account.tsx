@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { browserClient } from '@/lib/supabase/browser';
 import { Icon } from './icons';
 import { Avatar } from './bits';
@@ -11,6 +11,9 @@ type Me = { id: string; username: string; display_name: string; avatar_path: str
 /** Loads the signed-in user in the browser so every public page can stay cached. */
 export function useMe() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  // Sign-in/out happen in server actions followed by a client navigation, which
+  // fires no auth event in the browser, so re-check on every route change too.
+  const pathname = usePathname();
   useEffect(() => {
     const db = browserClient();
     let cancelled = false;
@@ -30,7 +33,7 @@ export function useMe() {
       cancelled = true;
       sub.subscription.unsubscribe();
     };
-  }, []);
+  }, [pathname]);
   return me;
 }
 

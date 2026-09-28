@@ -14,21 +14,23 @@ const REAL: Record<LogicalBucket, string> = {
 
 let client: AwsClient | null = null;
 function r2() {
-  if (!serverEnv.R2_ACCOUNT_ID || !serverEnv.R2_ACCESS_KEY_ID || !serverEnv.R2_SECRET_ACCESS_KEY) {
-    throw new Error('File storage is not configured (R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY).');
+  if ((!serverEnv.R2_ACCOUNT_ID && !serverEnv.R2_ENDPOINT) || !serverEnv.R2_ACCESS_KEY_ID || !serverEnv.R2_SECRET_ACCESS_KEY) {
+    throw new Error('File storage is not configured (R2_ACCOUNT_ID or R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY).');
   }
   client ??= new AwsClient({
     accessKeyId: serverEnv.R2_ACCESS_KEY_ID,
     secretAccessKey: serverEnv.R2_SECRET_ACCESS_KEY,
     service: 's3',
-    region: 'auto',
+    region: serverEnv.R2_REGION,
   });
   return client;
 }
 
+const endpoint = () => (serverEnv.R2_ENDPOINT || `https://${serverEnv.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`).replace(/\/$/, '');
+
 function objectUrl(bucket: LogicalBucket, key: string) {
   if (!/^[A-Za-z0-9/_.-]+$/.test(key) || key.includes('..')) throw new Error('Invalid object key');
-  return new URL(`https://${serverEnv.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${REAL[bucket]}/${key}`);
+  return new URL(`${endpoint()}/${REAL[bucket]}/${key}`);
 }
 
 /**
@@ -64,5 +66,3 @@ export async function deleteObjects(objects: { bucket: string; storage_path: str
   }));
 }
 
-/** Direct PUT host for the browser (used in the CSP connect-src). */
-export const r2UploadOrigin = () => `https://${serverEnv.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`;

@@ -127,7 +127,7 @@ export default async function HomePage() {
                   <div className="flex min-w-0 flex-col">
                     <Link href={`/@${c.username}`} className="truncate font-semibold after:absolute after:inset-0 after:content-['']">{c.display_name}</Link>
                     <span className="truncate text-[13px] text-ink-2">{c.location ?? `@${c.username}`}</span>
-                    <span className="font-mono text-xs text-ink-3">{formatCompact(c.followers)} followers · {c.template_count} templates</span>
+                    <span className="font-mono text-xs text-ink-3">{formatCompact(c.followers)} followers · {c.template_count} template{c.template_count === 1 ? "" : "s"}</span>
                   </div>
                 </article>
               ))}

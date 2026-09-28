@@ -35,10 +35,11 @@ if (!antivirus) console.warn('[scan] WARNING: running WITHOUT ClamAV (local dev)
 
 const db = createClient(url, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 
-if (!env.R2_ACCOUNT_ID || !env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY) throw new Error('R2_ACCOUNT_ID, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY are required');
-const r2 = new AwsClient({ accessKeyId: env.R2_ACCESS_KEY_ID, secretAccessKey: env.R2_SECRET_ACCESS_KEY, service: 's3', region: 'auto' });
+if ((!env.R2_ACCOUNT_ID && !env.R2_ENDPOINT) || !env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY) throw new Error('R2_ACCOUNT_ID (or R2_ENDPOINT), R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY are required');
+const r2 = new AwsClient({ accessKeyId: env.R2_ACCESS_KEY_ID, secretAccessKey: env.R2_SECRET_ACCESS_KEY, service: 's3', region: env.R2_REGION || 'auto' });
 const BUCKET = { quarantine: env.R2_BUCKET_QUARANTINE || 'yowkly-quarantine', files: env.R2_BUCKET_FILES || 'yowkly-files' };
-const r2url = (bucket, key) => `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${bucket}/${key}`;
+const R2_ENDPOINT = (env.R2_ENDPOINT || `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`).replace(/\/$/, '');
+const r2url = (bucket, key) => `${R2_ENDPOINT}/${bucket}/${key}`;
 const removeFromQuarantine = (key) => r2.fetch(r2url(BUCKET.quarantine, key), { method: 'DELETE' }).catch(() => {});
 
 /** clamd INSTREAM: <len:uint32be><bytes>... <0:uint32be>. clamd.conf must allow StreamMaxLength >= 210M. */
