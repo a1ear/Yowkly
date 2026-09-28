@@ -70,8 +70,8 @@ function AddImage({ templateId, kind, label }: { templateId: string; kind: 'cove
     if (!start.ok) return toast({ text: start.error, tone: 'error' });
     try {
       await putWithProgress(start.data.url, img.blob, img.type, () => {}).done;
-    } catch {
-      return toast({ text: 'Upload failed. Try again.', tone: 'error' });
+    } catch (e) {
+      return toast({ text: e instanceof Error ? e.message : 'Upload failed. Try again.', tone: 'error' });
     }
     const r = await registerMedia({ templateId, path: start.data.path, kind, device: kind === 'mobile_screen' ? 'mobile' : 'desktop', alt, width, height });
     if (!r.ok) return toast({ text: r.error, tone: 'error' });
