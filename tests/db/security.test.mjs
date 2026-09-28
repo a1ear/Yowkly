@@ -495,6 +495,31 @@ test('creator search: finds by name, username or skill; wildcards are literal', 
   assert.deepEqual(await find('z'), [], 'at least 2 characters');
 });
 
+test('scan queue: a file that crashes the scanner 3 times is rejected, not stuck forever', async () => {
+  const owner = await createUser(db, { email: 'scan-owner@test.dev' });
+  const [d] = ok(await as(db, owner, `select template_id, version_id from public.create_template('Scan retry test', $1::smallint)`, [s.websites]));
+  const [{ path }] = ok(await as(db, owner, `select public.prepare_file_upload($1, 'a.zip', 1000) as path`, [d.version_id]));
+  const [{ register_file: file }] = ok(await as(db, owner, `select public.register_file($1, $2, 'a.zip', 1000)`, [d.version_id, path]));
+
+  fails(await as(db, owner, `select public.scan_queue_size()`), /permission denied/, 'users cannot read the queue');
+  const [{ scan_queue_size: before }] = ok(await as(db, 'service', `select public.scan_queue_size()`));
+  assert.ok(before >= 1);
+
+  // Three claims that each "crash" (never call complete_scan), 15+ minutes apart.
+  for (let i = 0; i < 3; i++) {
+    const claimed = ok(await as(db, 'service', `select id from public.claim_scan_jobs(10)`));
+    assert.ok(claimed.some((c) => c.id === file), `attempt ${i + 1} claims the file`);
+    await db.query(`update public.template_files set scan_started_at = now() - interval '16 minutes' where id = $1`, [file]);
+  }
+  const claimedAgain = ok(await as(db, 'service', `select id from public.claim_scan_jobs(10)`));
+  assert.ok(!claimedAgain.some((c) => c.id === file), 'not claimed a fourth time');
+  const [f] = await sql(`select scan_status, reject_reason from public.template_files where id = $1`, [file]);
+  assert.equal(f.scan_status, 'rejected');
+  assert.match(f.reject_reason, /upload it again/);
+  const [n] = await sql(`select count(*)::int n from public.notifications where user_id = $1 and type = 'scan_failed'`, [owner]);
+  assert.equal(n.n, 1, 'the creator is told');
+});
+
 test('live standings expose counts, never voters', async () => {
   const rows = ok(await as(db, null, `select * from public.ranking_templates('week', 5)`));
   for (const r of rows) assert.deepEqual(Object.keys(r).sort(), ['template_id', 'votes']);

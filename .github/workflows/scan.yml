@@ -1,16 +1,20 @@
 name: Scan uploads
 
-# Free way to run the scan worker: every 30 minutes, start ClamAV, drain the
-# upload queue once, and stop. Uploads wait up to ~30 min before going live.
-# Public repos get unlimited Actions minutes; a private repo uses about
-# 3 min per run (≈4,300 min/month), which is over the 2,000 free minutes, so
-# for a private repo use an always-on free VM instead (docs/OPERATIONS.md §2).
+# Scans uploaded files with ClamAV plus archive checks, then marks them clean
+# or rejected. The site starts this workflow the moment a file is uploaded
+# (GITHUB_SCAN_TOKEN in Vercel), so files are usually ready in ~2 minutes.
+# The hourly schedule is a safety net for anything that was missed.
+#
+# Cheap by design, so a private repo stays inside the 2,000 free minutes:
+#   - first it asks Supabase whether anything is waiting, and stops if not;
+#   - the worker image and the ClamAV virus database are cached between runs.
+#
 # Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, R2_ACCOUNT_ID,
 #          R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_QUARANTINE, R2_BUCKET_FILES
 
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '17 * * * *'   # hourly; minute 17 avoids GitHub's busiest (top-of-hour) queue
   workflow_dispatch:
 
 concurrency:
@@ -20,12 +24,59 @@ concurrency:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - name: Build the worker image (ClamAV + Node)
-        run: docker build -f worker/Dockerfile -t yowkly-scan .
-      - name: Scan the queue once
+      - name: Anything to scan?
+        id: queue
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$KEY" ]; then
+            echo "::error::The SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY secret is missing (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+          body=$(curl -sS -w '\n%{http_code}' -X POST "${SUPABASE_URL%/}/rest/v1/rpc/scan_queue_size" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -d '{}') || {
+            echo "::error::Could not reach Supabase at $SUPABASE_URL. It must be https://<ref>.supabase.co."; exit 1; }
+          code=$(echo "$body" | tail -n1); n=$(echo "$body" | head -n1)
+          if [ "$code" != "200" ]; then
+            echo "::error::Supabase answered HTTP $code: $n"
+            echo "::error::401/403 usually means SUPABASE_SERVICE_ROLE_KEY is not the service_role (secret) key. 404 means the latest migrations weren't pushed (npx supabase db push)."
+            exit 1
+          fi
+          echo "Files waiting to be scanned: $n"
+          echo "pending=$n" >> "$GITHUB_OUTPUT"
+          echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v5
+        if: steps.queue.outputs.pending != '0'
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.queue.outputs.pending != '0'
+
+      - name: Build the worker image (ClamAV + Node), cached between runs
+        if: steps.queue.outputs.pending != '0'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: worker/Dockerfile
+          tags: yowkly-scan
+          load: true
+          cache-from: type=gha,scope=scan
+          cache-to: type=gha,scope=scan,mode=max
+
+      # ~230 MB of virus signatures: restored from yesterday, topped up by freshclam.
+      - name: Restore the virus database
+        if: steps.queue.outputs.pending != '0'
+        uses: actions/cache@v4
+        with:
+          path: clamdb
+          key: clamav-${{ steps.queue.outputs.day }}
+          restore-keys: clamav-
+
+      - name: Scan the queue
+        if: steps.queue.outputs.pending != '0'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -35,8 +86,18 @@ jobs:
           R2_BUCKET_QUARANTINE: ${{ secrets.R2_BUCKET_QUARANTINE }}
           R2_BUCKET_FILES: ${{ secrets.R2_BUCKET_FILES }}
         run: |
-          docker run --rm \
+          mkdir -p clamdb && chmod 777 clamdb
+          docker run --rm -v "$PWD/clamdb:/var/lib/clamav" \
             -e SUPABASE_URL -e SUPABASE_SERVICE_ROLE_KEY \
             -e R2_ACCOUNT_ID -e R2_ACCESS_KEY_ID -e R2_SECRET_ACCESS_KEY \
             -e R2_BUCKET_QUARANTINE -e R2_BUCKET_FILES \
-            yowkly-scan sh -c 'freshclam --stdout && clamd && node worker/scan.mjs --once'
+            yowkly-scan sh -c '
+              if ! freshclam --stdout; then
+                # ClamAV often rate-limits GitHub runners; signatures from the last run are fine for a day.
+                if ls /var/lib/clamav/daily.c?d >/dev/null 2>&1; then
+                  echo "[scan] freshclam could not update; using the cached virus database"
+                else
+                  echo "[scan] freshclam failed and there is no cached virus database yet"; exit 1
+                fi
+              fi
+              clamd && node worker/scan.mjs --once'

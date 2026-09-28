@@ -1,9 +1,11 @@
 'use server';
 import { redirect } from 'next/navigation';
+import { after } from 'next/server';
 import { revalidateTag } from 'next/cache';
 import { z } from 'zod';
 import { authed, fail, toUserError, type ActionResult } from '@/lib/actions';
 import { deleteObjects, presignUpload } from '@/lib/r2';
+import { triggerScan } from '@/lib/scan-trigger';
 import { templateTag } from '@/lib/data/template';
 import { publicEnv } from '@/lib/env';
 
@@ -118,6 +120,8 @@ export async function registerUpload(versionId: string, path: string, originalNa
   if ('error' in a) return a.error;
   const { data, error } = await a.db.rpc('register_file', { p_version: versionId, p_path: path, p_original_name: originalName, p_size: size });
   if (error) return fail(toUserError(error));
+  // Scan it now rather than at the next scheduled run (after the response, so the user doesn't wait).
+  after(triggerScan);
   return { ok: true, data: { id: data as string } };
 }
 

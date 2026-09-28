@@ -29,6 +29,12 @@ const serverSchema = z.object({
   R2_BUCKET_FILES: bucket('yowkly-files'),
   R2_BUCKET_MEDIA: bucket('yowkly-media'),
   SENTRY_DSN: optional,
+  // Starts the GitHub "Scan uploads" workflow as soon as a file is uploaded.
+  // Fine-grained token: this repo only, Actions: Read and write. Optional: without
+  // it, uploads wait for the hourly scheduled run.
+  GITHUB_SCAN_TOKEN: optional,
+  GITHUB_SCAN_REPO: z.string().regex(/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/, 'must look like owner/repo').default('a1ear/Yowkly'),
+  GITHUB_SCAN_REF: z.string().default('main'),
 });
 
 const parsed = serverSchema.safeParse({
@@ -43,6 +49,9 @@ const parsed = serverSchema.safeParse({
   R2_BUCKET_FILES: process.env.R2_BUCKET_FILES || undefined,
   R2_BUCKET_MEDIA: process.env.R2_BUCKET_MEDIA || undefined,
   SENTRY_DSN: process.env.SENTRY_DSN,
+  GITHUB_SCAN_TOKEN: process.env.GITHUB_SCAN_TOKEN,
+  GITHUB_SCAN_REPO: process.env.GITHUB_SCAN_REPO || undefined,
+  GITHUB_SCAN_REF: process.env.GITHUB_SCAN_REF || undefined,
 });
 if (!parsed.success) {
   // Name every bad setting at once, e.g. "R2_BUCKET_QUARANTINE: must be just the bucket name".

@@ -9,7 +9,7 @@ How to deploy, monitor, back up and restore Yowkly. "Done" means this runbook ha
 | Web | `npm run dev` | Vercel Hobby (free; **non-commercial use only**, move to Pro before charging money) |
 | Database + auth | `supabase start` | Supabase **Free** |
 | Uploaded files and images | R2 dev buckets | Cloudflare **R2 free tier**: 10 GB storage, free downloads, no per-file cap |
-| Scan worker | `npm run worker` | GitHub Actions every 30 min (`scan.yml`), or an always-free VM |
+| Scan worker | `npm run worker` | GitHub Actions (`scan.yml`): started by each upload, plus an hourly safety run |
 | Rate limits | in-memory | Upstash free |
 | Backups | none | GitHub Actions nightly `pg_dump` to R2 (`backup.yml`) |
 
@@ -45,7 +45,11 @@ How to deploy, monitor, back up and restore Yowkly. "Done" means this runbook ha
    - Create an **R2 API token** with Object Read & Write on those buckets. That gives you `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`.
 3. **Vercel** env vars (Production and Preview): `NEXT_PUBLIC_SITE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_MEDIA_URL`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_QUARANTINE`, `R2_BUCKET_FILES`, `R2_BUCKET_MEDIA`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, and `NEXT_PUBLIC_CONTACT_EMAIL` (the address shown on the Privacy, Terms and Copyright pages). Then turn on **Analytics** in the Vercel project (Web Analytics is cookie-free and free on Hobby; the `<Analytics />` tag is already in the layout). Without the R2 and Upstash values, uploads, downloads and every signed-in action fail in production. **Do not** put the Supabase service-role key or the database connection string in Vercel: the web app doesn't use either.
 4. **GitHub → Settings → Secrets → Actions** (for the scan worker and backups): `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_URL` (the **Session pooler** string from Supabase → Connect; the direct one is IPv6-only on Free and GitHub can't reach it), `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_QUARANTINE`, `R2_BUCKET_FILES`, `R2_BUCKET_BACKUPS`.
-5. **Scan worker:** `scan.yml` runs every 30 minutes on GitHub Actions. That's free for a public repo; a private repo would use about 4,300 of its 2,000 free minutes a month. For instant scans, or a private repo, run `worker/Dockerfile` on an always-free VM such as Oracle Cloud's (give it ≥ 2 GB RAM; ClamAV needs about 1.2 GB). Verify with the EICAR test file (section 5).
+5. **Scan worker:** `scan.yml` runs on GitHub Actions. Uploads start it straight away, so files are usually clean in about 2 minutes, and an hourly run catches anything missed.
+   - **Start-on-upload token:** GitHub → Settings (your account) → Developer settings → Personal access tokens → **Fine-grained tokens** → Generate. Repository access: only `Yowkly`. Permissions: **Actions: Read and write**. Put it in Vercel as `GITHUB_SCAN_TOKEN` (Secret) and redeploy. Without it, uploads wait for the hourly run.
+   - **Cost:** each run first asks Supabase whether anything is waiting and stops in seconds if not, and the worker image and virus database are cached. A private repo uses roughly 750 minutes a month idle plus ~1–2 minutes per upload, inside the 2,000 free minutes.
+   - **Never stuck:** a file whose scan crashes 3 times is rejected with "upload it again" and the creator is notified.
+   - For instant scans without GitHub, run `worker/Dockerfile` on an always-free VM such as Oracle Cloud's (≥ 2 GB RAM; ClamAV needs about 1.2 GB). Verify with the EICAR test file (section 5).
 6. **Domain:** add it in Vercel. HTTPS is automatic, and HSTS is sent by `next.config.ts`.
 7. **Make yourself admin** (SQL editor, after signing up on the live site):
    ```sql

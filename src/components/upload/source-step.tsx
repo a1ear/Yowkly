@@ -195,7 +195,7 @@ function FileStatus({ row }: { row: Row }) {
   if (row.kind === 'failed') return <Pill tone="danger" icon="x" label="Failed" />;
   switch (row.file.scan_status) {
     case 'pending':
-    case 'scanning': return <Pill tone="info" icon="shield" label="Scanning for malware" />;
+    case 'scanning': return <Pill tone="info" icon="shield" label="Scanning for malware · usually a few minutes" />;
     case 'clean': return <Pill tone="success" icon="check" label="Clean" />;
     default: return <Pill tone="danger" icon="x" label="Rejected" />;
   }

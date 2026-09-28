@@ -169,7 +169,14 @@ process.on('SIGINT', () => (running = false));
 console.log(`[scan] worker started (${antivirus ? 'ClamAV' : 'no antivirus, dev'})`);
 while (running) {
   let n = 0;
-  try { n = await tick(); } catch (e) { console.error('[scan]', e.message); }
+  try {
+    n = await tick();
+  } catch (e) {
+    console.error('[scan]', e.message);
+    // In --once mode (GitHub Actions) a failure must fail the run, so it shows
+    // up red instead of looking like "queue empty".
+    if (once) { process.exitCode = 1; break; }
+  }
   if (once && n === 0) break;
   if (n === 0) await new Promise((r) => setTimeout(r, 3000));
 }
