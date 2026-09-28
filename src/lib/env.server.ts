@@ -17,8 +17,11 @@ const serverSchema = z.object({
   UPSTASH_REDIS_REST_TOKEN: isProd ? z.string().min(10) : optional,
   // Cloudflare R2 holds every uploaded byte (quarantine, clean files, images).
   R2_ACCOUNT_ID: isProd ? accountId : accountId.optional().or(z.literal('')),
-  // Optional S3 endpoint override. Local dev points this at Supabase's S3-compatible storage.
-  R2_ENDPOINT: z.url().optional().or(z.literal('')),
+  // Local dev only (points at Supabase's S3 storage). In production the endpoint is
+  // built from R2_ACCOUNT_ID, so this must be left unset there.
+  R2_ENDPOINT: isProd
+    ? z.literal('', { error: 'must not be set in production (delete it; R2_ACCOUNT_ID is enough)' }).optional()
+    : z.url().optional().or(z.literal('')),
   R2_REGION: z.string().default('auto'),
   R2_ACCESS_KEY_ID: isProd ? z.string().min(10) : optional,
   R2_SECRET_ACCESS_KEY: isProd ? z.string().min(10) : optional,
