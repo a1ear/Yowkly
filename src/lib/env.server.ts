@@ -37,21 +37,25 @@ const serverSchema = z.object({
   GITHUB_SCAN_REF: z.string().default('main'),
 });
 
+// Values pasted into Vercel with a stray space or newline would otherwise break
+// signatures and URLs; empty strings count as unset.
+const clean = (v: string | undefined) => v?.trim() || undefined;
+
 const parsed = serverSchema.safeParse({
-  UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL,
-  UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN,
-  R2_ACCOUNT_ID: process.env.R2_ACCOUNT_ID,
-  R2_ENDPOINT: process.env.R2_ENDPOINT,
-  R2_REGION: process.env.R2_REGION || undefined,
-  R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID,
-  R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY,
-  R2_BUCKET_QUARANTINE: process.env.R2_BUCKET_QUARANTINE || undefined,
-  R2_BUCKET_FILES: process.env.R2_BUCKET_FILES || undefined,
-  R2_BUCKET_MEDIA: process.env.R2_BUCKET_MEDIA || undefined,
-  SENTRY_DSN: process.env.SENTRY_DSN,
-  GITHUB_SCAN_TOKEN: process.env.GITHUB_SCAN_TOKEN,
-  GITHUB_SCAN_REPO: process.env.GITHUB_SCAN_REPO || undefined,
-  GITHUB_SCAN_REF: process.env.GITHUB_SCAN_REF || undefined,
+  UPSTASH_REDIS_REST_URL: clean(process.env.UPSTASH_REDIS_REST_URL),
+  UPSTASH_REDIS_REST_TOKEN: clean(process.env.UPSTASH_REDIS_REST_TOKEN),
+  R2_ACCOUNT_ID: clean(process.env.R2_ACCOUNT_ID),
+  R2_ENDPOINT: clean(process.env.R2_ENDPOINT),
+  R2_REGION: clean(process.env.R2_REGION),
+  R2_ACCESS_KEY_ID: clean(process.env.R2_ACCESS_KEY_ID),
+  R2_SECRET_ACCESS_KEY: clean(process.env.R2_SECRET_ACCESS_KEY),
+  R2_BUCKET_QUARANTINE: clean(process.env.R2_BUCKET_QUARANTINE),
+  R2_BUCKET_FILES: clean(process.env.R2_BUCKET_FILES),
+  R2_BUCKET_MEDIA: clean(process.env.R2_BUCKET_MEDIA),
+  SENTRY_DSN: clean(process.env.SENTRY_DSN),
+  GITHUB_SCAN_TOKEN: clean(process.env.GITHUB_SCAN_TOKEN),
+  GITHUB_SCAN_REPO: clean(process.env.GITHUB_SCAN_REPO),
+  GITHUB_SCAN_REF: clean(process.env.GITHUB_SCAN_REF),
 });
 if (!parsed.success) {
   // Name every bad setting at once, e.g. "R2_BUCKET_QUARANTINE: must be just the bucket name".

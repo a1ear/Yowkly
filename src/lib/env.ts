@@ -7,18 +7,20 @@
 
 function url(name: string, value: string | undefined) {
   try {
-    return new URL(value ?? '').toString().replace(/\/$/, '');
+    return new URL((value ?? '').trim()).toString().replace(/\/$/, '');
   } catch {
     throw new Error(`${name} must be a valid URL (see .env.example).`);
   }
 }
 
 function required(name: string, value: string | undefined, min = 1) {
+  value = value?.trim();
   if (!value || value.length < min) throw new Error(`${name} is not set (see .env.example).`);
   return value;
 }
 
 function email(name: string, value: string | undefined) {
+  value = value?.trim();
   if (!value) return undefined;
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) throw new Error(`${name} must be an email address.`);
   return value;

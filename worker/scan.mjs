@@ -23,7 +23,9 @@ import net from 'node:net';
 import { AwsClient } from 'aws4fetch';
 import { inspectZip, magicOk, ZIP_BASED } from './checks.mjs';
 
-const env = process.env;
+// Trim every setting: a secret pasted with a trailing newline (easy to do in
+// GitHub's secret box) otherwise ends up inside the R2 signature header.
+const env = Object.fromEntries(Object.entries(process.env).map(([k, v]) => [k, typeof v === 'string' ? v.trim() : v]));
 const url = env.SUPABASE_URL ?? env.NEXT_PUBLIC_SUPABASE_URL;
 if (!url || !env.SUPABASE_SERVICE_ROLE_KEY) throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
 const production = env.NODE_ENV === 'production';
