@@ -3,25 +3,32 @@ import { z } from 'zod';
 
 const isProd = process.env.NODE_ENV === 'production' && process.env.VERCEL_ENV === 'production';
 const optional = z.string().optional().or(z.literal(''));
+// A bucket NAME, not a URL: pasting the bucket's "S3 API" address here doubles the
+// R2 host in upload URLs and every upload fails with a misleading CORS error.
+const bucket = (fallback: string) => z.string()
+  .regex(/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/, 'must be just the bucket name (e.g. yowkly-files), not a URL')
+  .default(fallback);
+// The 32-character hex ID from R2 → Account Details, not the https://….r2.cloudflarestorage.com address.
+const accountId = z.string().regex(/^[a-f0-9]{32}$/, 'must be the 32-character Account ID from R2 → Account Details, not a URL');
 
 const serverSchema = z.object({
   // Rate limiting must be real in production; locally an in-memory limiter is used.
   UPSTASH_REDIS_REST_URL: isProd ? z.url() : z.url().optional().or(z.literal('')),
   UPSTASH_REDIS_REST_TOKEN: isProd ? z.string().min(10) : optional,
   // Cloudflare R2 holds every uploaded byte (quarantine, clean files, images).
-  R2_ACCOUNT_ID: isProd ? z.string().min(10) : optional,
+  R2_ACCOUNT_ID: isProd ? accountId : accountId.optional().or(z.literal('')),
   // Optional S3 endpoint override. Local dev points this at Supabase's S3-compatible storage.
   R2_ENDPOINT: z.url().optional().or(z.literal('')),
   R2_REGION: z.string().default('auto'),
   R2_ACCESS_KEY_ID: isProd ? z.string().min(10) : optional,
   R2_SECRET_ACCESS_KEY: isProd ? z.string().min(10) : optional,
-  R2_BUCKET_QUARANTINE: z.string().default('yowkly-quarantine'),
-  R2_BUCKET_FILES: z.string().default('yowkly-files'),
-  R2_BUCKET_MEDIA: z.string().default('yowkly-media'),
+  R2_BUCKET_QUARANTINE: bucket('yowkly-quarantine'),
+  R2_BUCKET_FILES: bucket('yowkly-files'),
+  R2_BUCKET_MEDIA: bucket('yowkly-media'),
   SENTRY_DSN: optional,
 });
 
-export const serverEnv = serverSchema.parse({
+const parsed = serverSchema.safeParse({
   UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL,
   UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN,
   R2_ACCOUNT_ID: process.env.R2_ACCOUNT_ID,
@@ -34,3 +41,9 @@ export const serverEnv = serverSchema.parse({
   R2_BUCKET_MEDIA: process.env.R2_BUCKET_MEDIA || undefined,
   SENTRY_DSN: process.env.SENTRY_DSN,
 });
+if (!parsed.success) {
+  // Name every bad setting at once, e.g. "R2_BUCKET_QUARANTINE: must be just the bucket name".
+  throw new Error(`Invalid server environment variables:\n${
+    parsed.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message}`).join('\n')}`);
+}
+export const serverEnv = parsed.data;
