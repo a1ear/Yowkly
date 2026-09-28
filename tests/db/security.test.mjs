@@ -74,6 +74,35 @@ test('profile: edit self, not others, not trust level, not foreign avatar', asyn
   fails(await as(db, u.alice, `update public.profiles set username = 'settings' where id = $1`, [u.alice]), /reserved/);
 });
 
+test('renaming yourself works, reserved names are refused, the list stays private', async () => {
+  ok(await as(db, u.carol, `update public.profiles set username = 'carol_renamed', display_name = 'Carol' where id = $1`, [u.carol]));
+  fails(await as(db, u.carol, `update public.profiles set username = 'Admin' where id = $1`, [u.carol]), /reserved/, 'case trick');
+  fails(await as(db, u.carol, `update public.profiles set username = 'YOWKLY' where id = $1`, [u.carol]), /reserved/, 'case trick');
+  fails(await as(db, u.carol, `select * from public.reserved_usernames`), /permission denied/);
+  // Sign-up handles that differ only in case get a free variant instead of failing.
+  const twin = await createUser(db, { email: 'twin@test.dev', meta: { user_name: 'CAROL_RENAMED' } });
+  const [p] = await sql(`select username from public.profiles where id = $1`, [twin]);
+  assert.notEqual(p.username.toLowerCase(), 'carol_renamed');
+  const admin = await createUser(db, { email: 'admin2@test.dev', meta: { user_name: 'Admin' } });
+  const [q] = await sql(`select username from public.profiles where id = $1`, [admin]);
+  assert.notEqual(q.username.toLowerCase(), 'admin');
+});
+
+test('profile links are handles only, and the cover photo must be your own file', async () => {
+  const set = (col, v, uid = u.alice) => as(db, uid, `update public.profiles set ${col} = $2 where id = $1`, [uid, v]);
+  ok(await set('linkedin', 'alice-anderson-123'));
+  ok(await set('instagram', 'alice.designs'));
+  ok(await set('youtube', 'AliceBuilds'));
+  fails(await set('linkedin', 'https://evil.example/in/alice'), /check constraint/, 'URL instead of handle');
+  fails(await set('instagram', 'javascript:alert(1)'), /check constraint/, 'script scheme');
+  fails(await set('dribbble', 'a b'), /check constraint/, 'spaces');
+  ok(await set('banner_path', `${u.alice}/cover-abc12345.webp`));
+  fails(await set('banner_path', `${u.bob}/cover-abc12345.webp`), /row-level security/, 'someone else\'s cover');
+  none(await as(db, u.alice, `update public.profiles set linkedin = 'hijacked' where id = $1 returning id`, [u.bob]), 'edit another profile');
+  const [c] = ok(await as(db, null, `select linkedin, banner_path from public.creator_stats where id = $1`, [u.alice]));
+  assert.deepEqual({ ...c }, { linkedin: 'alice-anderson-123', banner_path: `${u.alice}/cover-abc12345.webp` });
+});
+
 test('users cannot grant themselves roles', async () => {
   fails(await as(db, u.bob, `insert into public.user_roles (user_id, role) values ($1, 'admin')`, [u.bob]),
         /row-level security/);

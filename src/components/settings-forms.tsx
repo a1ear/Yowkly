@@ -1,12 +1,14 @@
 'use client';
 import { useActionState } from 'react';
 import { updateProfile, deleteAccount } from '@/app/actions/profile';
+import Link from 'next/link';
 import { Icon } from './icons';
+import { SOCIALS, type SocialKey } from '@/lib/social';
 
 type Profile = {
   username: string; display_name: string; bio: string | null; location: string | null; website: string | null;
-  github: string | null; x_handle: string | null; skills: string[]; available_for_hire: boolean; hide_likes: boolean;
-};
+  skills: string[]; available_for_hire: boolean; hide_likes: boolean;
+} & Record<SocialKey, string | null>;
 
 function Text({ label, name, initial, hint, ...rest }: { label: string; name: string; initial?: string | null; hint?: string } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
@@ -30,12 +32,28 @@ export function ProfileForm({ profile: p }: { profile: Profile }) {
         <span className="label">Bio</span>
         <textarea name="bio" defaultValue={p.bio ?? ''} maxLength={500} rows={3} className="field h-auto py-2.5" />
       </label>
+      <p className="m-0 flex items-center gap-2 rounded-md bg-surface-1 p-3 text-[13px] text-ink-2 shadow-[inset_0_0_0_1px_var(--line)]">
+        <Icon name="camera" size={16} className="shrink-0" />
+        Change your profile photo and cover photo on <Link href={`/@${p.username}`} className="text-accent-ink underline underline-offset-4">your profile</Link>.
+      </p>
       <div className="grid gap-4 sm:grid-cols-2">
         <Text label="Location" name="location" initial={p.location} maxLength={80} />
         <Text label="Website" name="website" initial={p.website} type="url" placeholder="https://" />
-        <Text label="GitHub username" name="github" initial={p.github} maxLength={39} />
-        <Text label="X handle" name="x" initial={p.x_handle} maxLength={16} />
       </div>
+      <fieldset className="m-0 flex flex-col gap-3 border-0 p-0">
+        <legend className="label mb-1">Profile links</legend>
+        <p className="m-0 -mt-1 text-[12.5px] text-ink-3">Paste a profile link or type your username. Leave blank to hide it.</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {SOCIALS.map((s) => (
+            <label key={s.key} className="flex items-center gap-2.5 rounded-md bg-surface-1 pl-3 shadow-[inset_0_0_0_1px_var(--line)] focus-within:shadow-[inset_0_0_0_2px_var(--accent)]">
+              <Icon name={s.icon} size={17} className="shrink-0 text-ink-2" />
+              <span className="sr-only">{s.label}</span>
+              <input name={s.key} defaultValue={p[s.key] ?? ''} placeholder={`${s.label} ${s.placeholder}`} maxLength={200} autoComplete="off"
+                     className="h-11 min-w-0 flex-1 bg-transparent pr-3 text-sm text-ink outline-none placeholder:text-ink-3" />
+            </label>
+          ))}
+        </div>
+      </fieldset>
       <Text label="Skills" name="skills" initial={p.skills.join(', ')} hint="Comma-separated, up to 15." />
       <label className="flex items-center gap-3"><input type="checkbox" name="hire" defaultChecked={p.available_for_hire} className="h-[18px] w-[18px] accent-[var(--accent)]" />Show “Available for hire” on my profile</label>
       <label className="flex items-center gap-3"><input type="checkbox" name="hideLikes" defaultChecked={p.hide_likes} className="h-[18px] w-[18px] accent-[var(--accent)]" />Hide the templates I like from other people</label>

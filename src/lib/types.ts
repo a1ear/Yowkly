@@ -65,6 +65,12 @@ export type Creator = {
   following: number;
   votes_received: number;
   dev_awards: number;
+  banner_path: string | null;
+  linkedin: string | null;
+  dribbble: string | null;
+  behance: string | null;
+  instagram: string | null;
+  youtube: string | null;
 };
 
 export type License = {

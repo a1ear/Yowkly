@@ -497,6 +497,12 @@ Supabase Pro isn't affordable, so production runs at $0:
 - Tagline is now **"For Devs by Devs."** Header search collapses to an icon (⌘K / Ctrl+K opens it). CSS-only motion (page fades, scroll reveal, vote/like feedback), all disabled under `prefers-reduced-motion`.
 - A vote uses `updateTag` (read-your-own-write), so the voter's next page load shows their vote immediately; likes still don't touch the cache.
 
+### Profile wall (2026-09-28)
+- Profiles now look like a social wall: cover photo, overlapping avatar, link icons, an Intro card and stats beside the work.
+- **Links are stored as handles, never URLs** (GitHub, LinkedIn, X, Dribbble, Behance, Instagram, YouTube; CHECK per column). URLs are built from fixed domains, so a profile can't carry a phishing or `javascript:` link. People can paste a full URL; the server extracts the handle.
+- **Avatar and cover upload:** resized in the browser (400×400 / 1500×500 WebP, typically 5–60 KB) and uploaded to the owner's own folder in the `avatars` bucket; replacing one deletes the old file.
+- **Fixed two older username bugs** found while testing on real Supabase: the reserved-name check ran with the caller's rights (every profile save failed with "permission denied"), and it was case-sensitive ("Admin" slipped through). The PGlite test harness hadn't caught the first one, so profile edits are now also verified against local Supabase.
+
 ## 16. Build status
 
 **Verification level (2026-09-28):** code complete for the milestones marked ✅. Lint and typecheck are clean, and 37 automated tests pass (29 database attack tests on PGlite/Postgres 18, 8 hostile-archive tests). In a real browser, only the pages that need no database have been checked (sign-in, 404, legal, mobile nav), plus HTTP status codes and security headers. **Every data-backed page and flow still needs an end-to-end run against local Supabase** (Docker Desktop's engine would not start on the dev machine).

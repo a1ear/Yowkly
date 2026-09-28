@@ -11,7 +11,7 @@ export default async function SettingsPage() {
   const uid = claims?.claims?.sub;
   if (!uid) redirect('/auth/sign-in?next=/settings');
   const { data: p } = await db.from('profiles')
-    .select('username, display_name, bio, location, website, github, x_handle, skills, available_for_hire, hide_likes')
+    .select('username, display_name, bio, location, website, github, x_handle, linkedin, dribbble, behance, instagram, youtube, skills, available_for_hire, hide_likes')
     .eq('id', uid).single();
   return (
     <div className="mx-auto max-w-3xl px-4 pt-10">

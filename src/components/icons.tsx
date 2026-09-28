@@ -2,6 +2,17 @@ import type { SVGProps } from 'react';
 
 // One consistent line-icon set: 24 px grid, 1.75 stroke, round caps (design system board).
 const paths = {
+  linkedin: <><rect x="3" y="3" width="18" height="18" rx="3" /><path d="M8 10.5V17M8 7.2v.01M12 17v-6.5M12 13.5a2.5 2.5 0 0 1 5 0V17" /></>,
+  xLogo: <><path d="M4 4l11.6 16H20L8.4 4z" /><path d="M4.3 20l6.6-6.8M19.8 4l-6.4 6.5" /></>,
+  dribbble: <><circle cx="12" cy="12" r="9" /><path d="M8.6 3.7c3.9 4.8 6.1 10 7 16.4M3.1 10.7c5.4.6 10.4-.4 15-3.8M5.5 18.3c3.2-4.4 8-6 15.3-4.6" /></>,
+  behance: <><path d="M3 6h5a3 3 0 0 1 0 6H3zM3 12h6a3 3 0 0 1 0 6H3z" /><path d="M14 14h7a3.5 3.5 0 1 0-1.1 2.6" /><path d="M15 7.5h5" /></>,
+  instagram: <><rect x="3" y="3" width="18" height="18" rx="5" /><circle cx="12" cy="12" r="4" /><path d="M17.5 6.5v.01" /></>,
+  youtube: <><rect x="2.5" y="5" width="19" height="14" rx="4" /><path d="M10 9.5v5l4.5-2.5z" /></>,
+  camera: <><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" /><circle cx="12" cy="13.5" r="3.5" /></>,
+  globe: <><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></>,
+  mapPin: <><path d="M12 21s7-6.2 7-12a7 7 0 0 0-14 0c0 5.8 7 12 7 12z" /><circle cx="12" cy="9" r="2.5" /></>,
+  calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></>,
+  briefcase: <><rect x="3" y="7" width="18" height="13" rx="2" /><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18" /></>,
   // Yowkbit: the voting currency. A hexagonal token.
   bit: <><path d="M12 2.5l8.2 4.75v9.5L12 21.5l-8.2-4.75v-9.5z" /><path d="M9 9.5l3 2.5 3-2.5M12 12v4" /></>,
   trophy: <><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z" /><path d="M7 6H4a3 3 0 0 0 3 4M17 6h3a3 3 0 0 1-3 4" /></>,
