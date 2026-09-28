@@ -32,8 +32,11 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          if [ -z "$SUPABASE_URL" ] || [ -z "$KEY" ]; then
-            echo "::error::The SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY secret is missing (Settings > Secrets and variables > Actions)."
+          missing=""
+          [ -z "$SUPABASE_URL" ] && missing="$missing SUPABASE_URL"
+          [ -z "$KEY" ] && missing="$missing SUPABASE_SERVICE_ROLE_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing secret(s):$missing. Add them under Settings > Secrets and variables > Actions > Secrets tab > Repository secrets. Secrets saved under Variables, Environments (such as the Production/Preview ones Vercel creates), Dependabot or Codespaces are NOT visible to this workflow."
             exit 1
           fi
           body=$(curl -sS -w '\n%{http_code}' -X POST "${SUPABASE_URL%/}/rest/v1/rpc/scan_queue_size" \
@@ -75,6 +78,16 @@ jobs:
           key: clamav-${{ steps.queue.outputs.day }}
           restore-keys: clamav-
 
+      # First run (or cache evicted): take the signatures from ClamAV's official
+      # image instead of their download servers, which often refuse GitHub runners.
+      - name: Seed the virus database if the cache is empty
+        if: steps.queue.outputs.pending != '0'
+        run: |
+          mkdir -p clamdb && chmod 777 clamdb
+          if ls clamdb/daily.c?d >/dev/null 2>&1; then echo "Using the cached virus database"; exit 0; fi
+          docker run --rm -v "$PWD/clamdb:/out" --entrypoint sh clamav/clamav:stable -c 'cp /var/lib/clamav/*.c?d /out/'
+          ls -la clamdb
+
       - name: Scan the queue
         if: steps.queue.outputs.pending != '0'
         env:
@@ -86,7 +99,7 @@ jobs:
           R2_BUCKET_QUARANTINE: ${{ secrets.R2_BUCKET_QUARANTINE }}
           R2_BUCKET_FILES: ${{ secrets.R2_BUCKET_FILES }}
         run: |
-          mkdir -p clamdb && chmod 777 clamdb
+          set -o pipefail
           docker run --rm -v "$PWD/clamdb:/var/lib/clamav" \
             -e SUPABASE_URL -e SUPABASE_SERVICE_ROLE_KEY \
             -e R2_ACCOUNT_ID -e R2_ACCESS_KEY_ID -e R2_SECRET_ACCESS_KEY \
@@ -100,4 +113,10 @@ jobs:
                   echo "[scan] freshclam failed and there is no cached virus database yet"; exit 1
                 fi
               fi
-              clamd && node worker/scan.mjs --once'
+              clamd && node worker/scan.mjs --once' 2>&1 | tee scan.log && status=0 || status=$?
+          # Put problems on the run's summary page, not only deep in this log.
+          grep -E '^\[scan\] error' scan.log | tail -5 | while IFS= read -r line; do echo "::warning::$line"; done || true
+          if [ "$status" -ne 0 ]; then
+            grep -E '\[scan\]|ERROR|required|refused|denied' scan.log | tail -5 | while IFS= read -r line; do echo "::error::$line"; done || true
+            exit "$status"
+          fi
