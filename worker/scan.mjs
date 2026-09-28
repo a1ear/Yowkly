@@ -150,6 +150,8 @@ async function processJob(job) {
   }
 }
 
+let failedJobs = 0;
+
 async function tick() {
   const { data: jobs, error } = await db.rpc('claim_scan_jobs', { p_limit: 2 });
   if (error) throw new Error(`claim: ${error.message}`);
@@ -159,6 +161,7 @@ async function tick() {
     } catch (e) {
       // Leave it in "scanning": claim_scan_jobs retries after 15 min, up to 3 attempts.
       console.error(`[scan] error ${job.id}:`, e.message);
+      failedJobs++;
     }
   }
   return (jobs ?? []).length;
@@ -179,6 +182,13 @@ while (running) {
     // up red instead of looking like "queue empty".
     if (once) { process.exitCode = 1; break; }
   }
-  if (once && n === 0) break;
+  if (once && n === 0) {
+    // A run that couldn't scan a file must not show a green check.
+    if (failedJobs > 0) {
+      console.error(`[scan] ${failedJobs} file(s) could not be scanned; they will be retried in 15 minutes`);
+      process.exitCode = 1;
+    }
+    break;
+  }
   if (n === 0) await new Promise((r) => setTimeout(r, 3000));
 }
