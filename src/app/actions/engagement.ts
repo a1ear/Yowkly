@@ -119,7 +119,7 @@ export async function deleteComment(commentId: string, templateId: string): Prom
 }
 
 const reportSchema = z.object({
-  targetType: z.enum(['template', 'comment', 'profile', 'collection']),
+  targetType: z.enum(['template', 'comment', 'profile', 'collection', 'post']),
   targetId: uuid,
   reason: z.enum(['spam', 'malware', 'copyright', 'inappropriate', 'broken', 'other']),
   details: z.string().trim().max(1000).optional(),

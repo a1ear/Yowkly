@@ -17,6 +17,7 @@ export function SiteHeader() {
             ['/explore', 'Explore'],
             ['/for-you', 'For You'],
             ['/ranking', 'Ranking'],
+            ['/community', 'Community'],
             ['/categories', 'Categories'],
           ].map(([href, label]) => (
             <Link key={href} href={href} className="nav-link inline-flex h-11 items-center text-sm font-medium whitespace-nowrap text-ink-2 hover:text-accent-ink">

@@ -5,7 +5,7 @@ import { userClient } from '@/lib/supabase/clients';
 import { Cover } from '@/components/cover';
 import { StatusPill } from '@/components/status-pill';
 import { EmptyState } from '@/components/bits';
-import { TemplateModActions, ReportActions } from '@/components/admin/mod-actions';
+import { TemplateModActions, ReportActions, PostRemoveAction } from '@/components/admin/mod-actions';
 import { formatBytes, timeAgo } from '@/lib/format';
 import type { TemplateCard } from '@/lib/types';
 
@@ -29,6 +29,12 @@ export default async function AdminPage(props: PageProps<'/admin'>) {
       .order('created_at', { ascending: false }).limit(100) : Promise.resolve({ data: [] }),
   ]);
   const pending = (queue ?? []) as TemplateCard[];
+  // Reported posts: show what was said and who said it, so the report can be judged.
+  const postIds = (reports ?? []).filter((r) => r.target_type === 'post').map((r) => r.target_id as string);
+  const { data: reportedPosts } = postIds.length
+    ? await db.from('posts').select('id, body, status, author:profiles!posts_author_id_fkey(username)').in('id', postIds)
+    : { data: [] };
+  const postById = new Map(((reportedPosts ?? []) as unknown as { id: string; body: string; status: string; author: { username: string } | null }[]).map((p) => [p.id, p]));
   const { data: files } = pending.length
     ? await db.from('template_files').select('template_id, original_name, size_bytes, scan_status, reject_reason').in('template_id', pending.map((p) => p.id))
     : { data: [] };
@@ -75,6 +81,16 @@ export default async function AdminPage(props: PageProps<'/admin'>) {
                   <span className="text-ink-3">by @{(r.reporter as unknown as { username: string } | null)?.username ?? 'deleted'} · {timeAgo(r.created_at as string)}</span>
                 </div>
                 {r.details && <p className="m-0 text-ink-2">{r.details as string}</p>}
+                {r.target_type === 'post' && (() => {
+                  const post = postById.get(r.target_id as string);
+                  return post ? (
+                    <div className="flex flex-col gap-2 rounded-lg bg-surface-2 p-3">
+                      <p className="m-0 text-[13px] text-ink-3">Post by @{post.author?.username ?? 'deleted'}{post.status === 'removed' ? ' · already removed' : ''}</p>
+                      <p className="m-0 break-words whitespace-pre-line">{post.body}</p>
+                      {post.status === 'published' && <PostRemoveAction id={post.id} />}
+                    </div>
+                  ) : <p className="m-0 text-ink-3">The post no longer exists.</p>;
+                })()}
                 <ReportActions id={r.id as string} />
               </li>
             ))}

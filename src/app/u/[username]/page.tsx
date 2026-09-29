@@ -2,6 +2,8 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getCreator, getCreatorTemplates, getAwards } from '@/lib/data/public';
+import { getPosts } from '@/lib/data/posts';
+import { PostComposer, PostList } from '@/components/posts';
 import { publicClient } from '@/lib/supabase/clients';
 import { Avatar, EmptyState, AwardRibbon } from '@/components/bits';
 import { TemplateCard } from '@/components/template-card';
@@ -26,7 +28,7 @@ export async function generateMetadata(props: PageProps<'/u/[username]'>): Promi
   };
 }
 
-const TABS = ['templates', 'collections', 'ranking'] as const;
+const TABS = ['posts', 'templates', 'collections', 'ranking'] as const;
 
 /** A creator's own cover photo, or a calm generated one (unique per username) until they add theirs. */
 function Cover({ c }: { c: Creator }) {
@@ -54,17 +56,18 @@ export default async function ProfilePage(props: PageProps<'/u/[username]'>) {
   const tab = (TABS as readonly string[]).includes(String(sp.tab)) ? (String(sp.tab) as (typeof TABS)[number]) : 'templates';
   const c = await getCreator(username);
   if (!c) notFound();
-  const [templates, collections, awards] = await Promise.all([
+  const [templates, collections, awards, posts] = await Promise.all([
     getCreatorTemplates(c.id),
     publicClient([`creator:${c.username.toLowerCase()}`]).from('collections')
       .select('id, name, description, collection_items(count)').eq('owner_id', c.id).eq('is_public', true).order('created_at'),
     tab === 'ranking' ? getAwards() : Promise.resolve([]),
+    getPosts({ authorId: c.id }),
   ]);
   const myAwards = awards.filter((a) => a.template.owner_id === c.id);
   const cols = (collections.data ?? []) as { id: string; name: string; description: string | null; collection_items: { count: number }[] }[];
   const links = SOCIALS.flatMap((s) => (c[s.key] ? [{ ...s, handle: c[s.key]! }] : []));
   const joined = new Date(c.created_at).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
-  const counts: Record<(typeof TABS)[number], number> = { templates: templates.length, collections: cols.length, ranking: c.awards + c.dev_awards };
+  const counts: Record<(typeof TABS)[number], number> = { posts: posts.total, templates: templates.length, collections: cols.length, ranking: c.awards + c.dev_awards };
 
   return (
     <div className="mx-auto max-w-[1200px] md:px-6 md:pt-6">
@@ -174,6 +177,13 @@ export default async function ProfilePage(props: PageProps<'/u/[username]'>) {
         </aside>
 
         <div className="min-w-0">
+          {tab === 'posts' && (
+            <div className="flex flex-col gap-4">
+              <PostComposer onlyFor={c.id} />
+              <PostList posts={posts.rows} emptyText={`${c.display_name} hasn't posted anything yet.`} />
+            </div>
+          )}
+
           {tab === 'templates' && (templates.length ? (
             <div className="grid grid-cols-1 gap-x-6 gap-y-9 sm:grid-cols-2 xl:grid-cols-3">{templates.map((t) => <TemplateCard key={t.id} t={t} />)}</div>
           ) : <EmptyState title="No templates yet" body={`${c.display_name} hasn't published anything yet.`} />)}

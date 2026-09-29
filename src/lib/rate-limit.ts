@@ -10,6 +10,7 @@ export const LIMITS = {
   like: { tokens: 60, window: '10 m' },
   vote: { tokens: 30, window: '1 h' },
   comment: { tokens: 10, window: '10 m' },
+  post: { tokens: 10, window: '1 h' },
   report: { tokens: 20, window: '1 d' },
   follow: { tokens: 60, window: '10 m' },
   download: { tokens: 30, window: '1 h' },

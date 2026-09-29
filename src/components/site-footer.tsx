@@ -6,7 +6,7 @@ const COLUMNS: [string, [string, string][]][] = [
     ['/c/websites', 'Websites'], ['/c/mobile-apps', 'Mobile Apps'], ['/c/ui-kits', 'UI Kits'],
     ['/c/components', 'Components'], ['/c/presentations', 'Presentations'], ['/c/concepts', 'Concepts'],
   ]],
-  ['Yowkly', [['/ranking', 'Ranking'], ['/legal/licenses', 'Licenses explained'], ['/legal/upload-guidelines', 'Upload guidelines']]],
+  ['Yowkly', [['/ranking', 'Ranking'], ['/community', 'Community'], ['/legal/licenses', 'Licenses explained'], ['/legal/upload-guidelines', 'Upload guidelines']]],
   ['Legal', [['/legal/terms', 'Terms'], ['/legal/privacy', 'Privacy'], ['/legal/dmca', 'DMCA']]],
 ];
 

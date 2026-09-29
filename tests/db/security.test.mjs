@@ -346,10 +346,66 @@ test('private collections are invisible and cannot be written by others', async 
   ok(await as(db, u.bob, `insert into public.collection_items (collection_id, template_id) values ($1, $2)`, [col.id, s.tpl]));
 });
 
+test('community posts: validated, rate-limited, private likes, removal by author or moderator', async () => {
+  const create = (uid, body, tags = []) => as(db, uid, `select public.create_post($1, $2::text[]) as id`, [body, tags]);
+
+  fails(await create(u.unverified, 'hello'), /Verify your email/, 'unverified user posts');
+  fails(await create(null, 'hello'), /permission denied|Sign in|not authenticated|Not signed in/i, 'anon posts');
+  fails(await as(db, u.alice, `insert into public.posts (author_id, body) values ($1, 'direct')`, [u.alice]), /permission denied/, 'direct insert');
+
+  fails(await create(u.alice, '   '), /Write something/);
+  fails(await create(u.alice, 'x'.repeat(1501)), /1,500/);
+  fails(await create(u.alice, 'tagged', ['a b']), /Tags are/);
+  fails(await create(u.alice, 'tagged', ['one', 'two', 'three', 'four', 'five', 'six']), /up to 5/);
+
+  const [{ id }] = ok(await create(u.alice, '  Shipped my first template!  ', ['#React', 'react', 'Design-Tips']));
+  s.post = id;
+  const [card] = ok(await as(db, null, `select body, tags, like_count, author_username from public.post_cards where id = $1`, [id]));
+  assert.equal(card.body, 'Shipped my first template!');
+  assert.deepEqual(card.tags, ['react', 'design-tips']);
+  assert.equal(card.author_username, 'alice');
+  fails(await create(u.alice, 'Shipped my first template!'), /already posted/, 'duplicate post');
+
+  // Nobody edits a post in place, not even the author.
+  fails(await as(db, u.alice, `update public.posts set body = 'rewritten' where id = $1`, [id]), /permission denied/);
+  fails(await as(db, u.alice, `update public.posts set like_count = 999 where id = $1`, [id]), /permission denied/);
+
+  // Likes: as yourself, once each, private to the liker, counted on the post.
+  ok(await as(db, u.bob, `insert into public.post_likes (post_id) values ($1)`, [id]));
+  fails(await as(db, u.bob, `insert into public.post_likes (post_id) values ($1)`, [id]), /duplicate key/, 'double like');
+  fails(await as(db, u.bob, `insert into public.post_likes (post_id, user_id) values ($1, $2)`, [id, u.carol]), /permission denied/, 'like as someone else');
+  assert.equal(ok(await as(db, null, `select like_count from public.post_cards where id = $1`, [id]))[0].like_count, 1);
+  none(await as(db, u.alice, `select 1 from public.post_likes where user_id = $1`, [u.bob]), 'author reads who liked');
+  fails(await as(db, null, `select 1 from public.post_likes`), /permission denied/, 'anon reads likes');
+  none(await as(db, u.carol, `delete from public.post_likes where user_id = $1 returning 1`, [u.bob]), 'unlike as someone else');
+  ok(await as(db, u.bob, `delete from public.post_likes where post_id = $1`, [id]));
+  assert.equal(ok(await as(db, null, `select like_count from public.post_cards where id = $1`, [id]))[0].like_count, 0);
+
+  // Anyone signed in can report a post; reports are private to the reporter and moderators.
+  ok(await as(db, u.bob, `insert into public.reports (target_type, target_id, reason) values ('post', $1, 'spam')`, [id]));
+  none(await as(db, u.carol, `select 1 from public.reports where target_id = $1`, [id]), 'bystander reads a report about a post');
+
+  // Removal: only the author or a moderator, and moderators must say why and leave a trail.
+  fails(await as(db, u.bob, `select public.delete_post($1)`, [id]), /Not allowed/);
+  fails(await as(db, u.mod, `select public.delete_post($1)`, [id]), /reason is required/);
+  ok(await as(db, u.mod, `select public.delete_post($1, 'spam')`, [id]));
+  none(await as(db, null, `select 1 from public.post_cards where id = $1`, [id]), 'removed post still public');
+  none(await as(db, u.bob, `select 1 from public.posts where id = $1`, [id]), 'others read a removed post');
+  assert.equal(ok(await as(db, u.alice, `select status from public.posts where id = $1`, [id]))[0].status, 'removed');
+  fails(await as(db, u.bob, `insert into public.post_likes (post_id) values ($1)`, [id]), /row-level security/, 'like a removed post');
+  const log = await sql(`select action, reason from public.moderation_log where target_id = $1`, [id]);
+  assert.deepEqual(log.map((l) => l.action), ['remove_post']);
+
+  // Authors can remove their own without a reason.
+  const [{ id: mine }] = ok(await create(u.alice, 'A second thought'));
+  ok(await as(db, u.alice, `select public.delete_post($1)`, [mine]));
+  none(await as(db, null, `select 1 from public.post_cards where id = $1`, [mine]));
+});
+
 test('reports are private to the reporter and moderators', async () => {
   ok(await as(db, u.bob, `insert into public.reports (target_type, target_id, reason) values ('template', $1, 'broken')`, [s.tpl]));
   none(await as(db, u.alice, `select id from public.reports`));
-  assert.equal(ok(await as(db, u.mod, `select id from public.reports`)).length, 1);
+  assert.equal(ok(await as(db, u.mod, `select id from public.reports where target_id = $1`, [s.tpl])).length, 1);
   fails(await as(db, u.bob, `update public.reports set status = 'resolved'`), /permission denied/);
 });
 
