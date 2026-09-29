@@ -402,6 +402,62 @@ test('community posts: validated, rate-limited, private likes, removal by author
   none(await as(db, null, `select 1 from public.post_cards where id = $1`, [mine]));
 });
 
+test('post comments and dislikes: validated, limited, removable by the right people only', async () => {
+  const [{ id: post }] = ok(await as(db, u.alice, `select public.create_post('Comment on me', '{}') as id`));
+  const comment = (uid, id, body) => as(db, uid, `select public.create_post_comment($1, $2) as id`, [id, body]);
+  const counts = async () => (await sql(`select comment_count, like_count, dislike_count from public.post_cards where id = $1`, [post]))[0];
+
+  fails(await comment(u.unverified, post, 'hi'), /Verify your email/, 'unverified comments');
+  fails(await comment(u.bob, post, '  '), /Write a comment/);
+  fails(await comment(u.bob, post, 'x'.repeat(801)), /800/);
+  fails(await comment(u.bob, '00000000-0000-0000-0000-000000000000', 'hi'), /Post not found/);
+  fails(await as(db, u.bob, `insert into public.post_comments (post_id, author_id, body) values ($1, $2, 'direct')`, [post, u.bob]), /permission denied/, 'direct insert');
+
+  const [{ id: c1 }] = ok(await comment(u.bob, post, '  Nice work!  '));
+  assert.equal((await counts()).comment_count, 1);
+  const [card] = ok(await as(db, null, `select body, author_username from public.post_comment_cards where post_id = $1`, [post]));
+  assert.equal(card.body, 'Nice work!');
+  assert.equal(card.author_username, 'bob');
+  fails(await comment(u.bob, post, 'Nice work!'), /already said that/, 'duplicate comment');
+  fails(await as(db, u.bob, `update public.post_comments set body = 'rewritten' where id = $1`, [c1]), /permission denied/, 'edit a comment');
+
+  // Who may remove a comment: its author, the post's author, or a moderator with a reason.
+  fails(await as(db, u.carol, `select public.delete_post_comment($1)`, [c1]), /Not allowed/);
+  fails(await as(db, u.mod, `select public.delete_post_comment($1)`, [c1]), /reason is required/);
+  ok(await as(db, u.alice, `select public.delete_post_comment($1)`, [c1]));
+  assert.equal((await counts()).comment_count, 0);
+  none(await as(db, null, `select 1 from public.post_comment_cards where id = $1`, [c1]), 'removed comment still public');
+  fails(await as(db, u.bob, `select public.delete_post_comment($1)`, [c1]), /not found/i, 'remove twice');
+
+  const [{ id: c2 }] = ok(await comment(u.carol, post, 'Second opinion'));
+  ok(await as(db, u.mod, `select public.delete_post_comment($1, 'abusive')`, [c2]));
+  assert.deepEqual((await sql(`select action from public.moderation_log where target_id = $1`, [c2])).map((l) => l.action), ['remove_post_comment']);
+  ok(await as(db, u.alice, `select public.create_post_comment($1, 'Thanks!')`, [post]));
+  assert.equal((await counts()).comment_count, 1);
+
+  // Ten comments in ten minutes is the ceiling.
+  for (let i = 0; i < 8; i++) ok(await comment(u.bob, post, `burst ${i}`));
+  ok(await comment(u.bob, post, 'burst 8'));
+  fails(await comment(u.bob, post, 'one too many'), /Slow down/);
+
+  // Reactions: one per person, like or dislike, switchable, private, counted.
+  ok(await as(db, u.bob, `insert into public.post_likes (post_id) values ($1)`, [post]));
+  ok(await as(db, u.carol, `insert into public.post_likes (post_id, kind) values ($1, 'dislike')`, [post]));
+  assert.deepEqual([(await counts()).like_count, (await counts()).dislike_count], [1, 1]);
+  fails(await as(db, u.mod, `insert into public.post_likes (post_id, kind) values ($1, 'love')`, [post]), /violates check|invalid/, 'unknown reaction');
+  ok(await as(db, u.bob, `update public.post_likes set kind = 'dislike' where post_id = $1`, [post]));
+  assert.deepEqual([(await counts()).like_count, (await counts()).dislike_count], [0, 2]);
+  none(await as(db, u.alice, `update public.post_likes set kind = 'like' where user_id = $1 returning 1`, [u.bob]), 'switch someone else\'s reaction');
+  fails(await as(db, u.bob, `update public.post_likes set user_id = $1 where post_id = $2`, [u.carol, post]), /permission denied/, 'hand a reaction to someone else');
+  ok(await as(db, u.bob, `delete from public.post_likes where post_id = $1`, [post]));
+  ok(await as(db, u.carol, `delete from public.post_likes where post_id = $1`, [post]));
+  assert.deepEqual([(await counts()).like_count, (await counts()).dislike_count], [0, 0]);
+
+  // A removed post takes no new comments.
+  ok(await as(db, u.alice, `select public.delete_post($1)`, [post]));
+  fails(await comment(u.carol, post, 'too late'), /Post not found/);
+});
+
 test('reports are private to the reporter and moderators', async () => {
   ok(await as(db, u.bob, `insert into public.reports (target_type, target_id, reason) values ('template', $1, 'broken')`, [s.tpl]));
   none(await as(db, u.alice, `select id from public.reports`));

@@ -2,7 +2,7 @@
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 import { moderateTemplate, resolveReport } from '@/app/actions/moderation';
-import { deletePost } from '@/app/actions/posts';
+import { deletePost, removePostComment } from '@/app/actions/posts';
 import { useToast } from '../toast';
 
 export function TemplateModActions({ id, status }: { id: string; status: string }) {
@@ -52,22 +52,22 @@ export function ReportActions({ id }: { id: string }) {
   );
 }
 
-/** Remove a reported post (the reason is required and goes in the audit log). */
-export function PostRemoveAction({ id }: { id: string }) {
+/** Remove a reported post or post comment (the reason is required and goes in the audit log). */
+export function PostRemoveAction({ id, kind = 'post' }: { id: string; kind?: 'post' | 'comment' }) {
   const router = useRouter();
   const toast = useToast();
   const [reason, setReason] = useState('');
   const [pending, start] = useTransition();
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} aria-label="Reason for removing the post" className="field h-9 max-w-xs" placeholder="Reason (required)" />
+      <input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} aria-label={`Reason for removing the ${kind}`} className="field h-9 max-w-xs" placeholder="Reason (required)" />
       <button type="button" disabled={pending || reason.trim().length < 3} className="btn btn-danger h-9 px-3"
               onClick={() => start(async () => {
-                const r = await deletePost(id, reason);
+                const r = await (kind === 'post' ? deletePost(id, reason) : removePostComment(id, reason));
                 if (!r.ok) return toast({ text: r.error, tone: 'error' });
-                toast({ text: 'Post removed.', tone: 'ok' });
+                toast({ text: kind === 'post' ? 'Post removed.' : 'Comment removed.', tone: 'ok' });
                 router.refresh();
-              })}>Remove post</button>
+              })}>{kind === 'post' ? 'Remove post' : 'Remove comment'}</button>
     </div>
   );
 }

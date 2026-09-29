@@ -3,7 +3,7 @@ import { updateTag } from 'next/cache';
 import { z } from 'zod';
 import { authed, fail, toUserError, type ActionResult } from '@/lib/actions';
 import { userClient } from '@/lib/supabase/clients';
-import { POSTS_TAG } from '@/lib/data/posts';
+import { POSTS_TAG, type PostComment } from '@/lib/data/posts';
 import type { FormState } from './profile';
 
 const uuid = z.uuid();
@@ -38,27 +38,76 @@ export async function deletePost(postId: string, reason?: string): Promise<Actio
   return { ok: true, data: null };
 }
 
-// The button is optimistic; the posts cache is refreshed so a reload shows the real count next to your like.
-export async function setPostLike(postId: string, liked: boolean): Promise<ActionResult<{ liked: boolean }>> {
-  if (!uuid.safeParse(postId).success) return fail('Invalid post.');
+const kindSchema = z.enum(['like', 'dislike']).nullable();
+
+/**
+ * One reaction per person per post: like, dislike, or none (null) to take it back.
+ * Switching updates your existing row. The button is optimistic; the posts cache
+ * is refreshed so a reload shows the real counts next to your reaction.
+ */
+export async function setPostReaction(postId: string, kind: 'like' | 'dislike' | null): Promise<ActionResult> {
+  const k = kindSchema.safeParse(kind);
+  if (!uuid.safeParse(postId).success || !k.success) return fail('Invalid post.');
   const a = await authed('like');
   if ('error' in a) return a.error;
-  const res = liked
-    ? await a.db.from('post_likes').upsert({ post_id: postId }, { onConflict: 'post_id,user_id', ignoreDuplicates: true })
-    : await a.db.from('post_likes').delete().eq('post_id', postId).eq('user_id', a.uid);
-  if (res.error) return fail(toUserError(res.error));
+  if (k.data === null) {
+    const del = await a.db.from('post_likes').delete().eq('post_id', postId).eq('user_id', a.uid);
+    if (del.error) return fail(toUserError(del.error));
+  } else {
+    const change = () => a.db.from('post_likes').update({ kind: k.data }).eq('post_id', postId).eq('user_id', a.uid).select('post_id');
+    let res = await change();
+    if (!res.error && !res.data?.length) {
+      const ins = await a.db.from('post_likes').insert({ post_id: postId, kind: k.data });
+      // Two quick taps: the other request inserted first, so change that row instead.
+      if (ins.error?.code === '23505') res = await change();
+      else if (ins.error) return fail(toUserError(ins.error));
+    }
+    if (res.error) return fail(toUserError(res.error));
+  }
   updateTag(POSTS_TAG);
-  return { ok: true, data: { liked } };
+  return { ok: true, data: null };
 }
 
-/** Which of these posts the signed-in user liked. Read-only; RLS scopes it to the caller. */
-export async function postLikeStates(postIds: string[]): Promise<{ me: string | null; liked: string[] }> {
+/** The signed-in user's reaction to each of these posts. Read-only; RLS scopes it to the caller. */
+export async function postReactionStates(postIds: string[]): Promise<{ me: string | null; reactions: Record<string, 'like' | 'dislike'> }> {
   const ids = z.array(uuid).max(50).safeParse(postIds);
-  if (!ids.success) return { me: null, liked: [] };
+  if (!ids.success) return { me: null, reactions: {} };
   const db = await userClient();
   const { data } = await db.auth.getClaims();
   const me = (data?.claims?.sub as string | undefined) ?? null;
-  if (!me || !ids.data.length) return { me, liked: [] };
-  const { data: rows } = await db.from('post_likes').select('post_id').eq('user_id', me).in('post_id', ids.data);
-  return { me, liked: ((rows ?? []) as { post_id: string }[]).map((r) => r.post_id) };
+  if (!me || !ids.data.length) return { me, reactions: {} };
+  const { data: rows } = await db.from('post_likes').select('post_id, kind').eq('user_id', me).in('post_id', ids.data);
+  return { me, reactions: Object.fromEntries(((rows ?? []) as { post_id: string; kind: 'like' | 'dislike' }[]).map((r) => [r.post_id, r.kind])) };
+}
+
+/** Comments on a post, oldest first (up to 100). Public data, read with the caller's own session. */
+export async function loadPostComments(postId: string): Promise<PostComment[]> {
+  if (!uuid.safeParse(postId).success) return [];
+  const db = await userClient();
+  const { data } = await db.from('post_comment_cards').select('*').eq('post_id', postId).order('created_at').limit(100);
+  return (data ?? []) as PostComment[];
+}
+
+/** Add a comment. create_post_comment re-checks everything: verified email, 1 to 800 characters, limits. */
+export async function addPostComment(postId: string, body: string): Promise<ActionResult<PostComment>> {
+  const parsed = z.object({ id: uuid, body: z.string().max(2000) }).safeParse({ id: postId, body });
+  if (!parsed.success) return fail('That comment is too long.');
+  const a = await authed('comment');
+  if ('error' in a) return a.error;
+  const { data: id, error } = await a.db.rpc('create_post_comment', { p_post: postId, p_body: parsed.data.body });
+  if (error) return fail(toUserError(error));
+  const { data: card } = await a.db.from('post_comment_cards').select('*').eq('id', id as string).single();
+  updateTag(POSTS_TAG);
+  return card ? { ok: true, data: card as PostComment } : fail('Comment saved, reload to see it.');
+}
+
+/** The commenter, the post's author, or a moderator (with a reason) can remove a comment. */
+export async function removePostComment(commentId: string, reason?: string): Promise<ActionResult> {
+  if (!uuid.safeParse(commentId).success) return fail('Invalid comment.');
+  const a = await authed('write');
+  if ('error' in a) return a.error;
+  const { error } = await a.db.rpc('delete_post_comment', { p_comment: commentId, p_reason: reason?.trim().slice(0, 500) || null });
+  if (error) return fail(toUserError(error));
+  updateTag(POSTS_TAG);
+  return { ok: true, data: null };
 }

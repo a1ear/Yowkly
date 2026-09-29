@@ -5,6 +5,12 @@ import { publicClient } from '@/lib/supabase/clients';
 export type Post = {
   id: string; body: string; tags: string[]; like_count: number; created_at: string;
   author_id: string; author_username: string; author_display_name: string; author_avatar_path: string | null;
+  comment_count: number; dislike_count: number;
+};
+
+export type PostComment = {
+  id: string; post_id: string; body: string; created_at: string;
+  author_id: string; author_username: string; author_display_name: string; author_avatar_path: string | null;
 };
 
 export const POST_PAGE_SIZE = 20;

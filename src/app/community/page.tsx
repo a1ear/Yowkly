@@ -22,14 +22,10 @@ export default async function CommunityPage(props: PageProps<'/community'>) {
   };
 
   return (
-    <div className="mx-auto max-w-[760px] px-4 pt-10 pb-16 md:px-6">
-      <div className="rise flex flex-col gap-2">
-        <span className="eyebrow">Community</span>
-        <h1 className="m-0 font-display text-[44px] leading-none font-normal md:text-6xl">What devs are saying.</h1>
-        <p className="m-0 max-w-xl text-ink-2">Share what you&apos;re building, a lesson you learned or a question for other developers. Add tags so the right people find it.</p>
-      </div>
+    <div className="mx-auto max-w-[760px] px-4 pt-6 pb-16 md:px-6">
+      <h1 className="sr-only">Community</h1>
 
-      <div className="mt-8"><PostComposer /></div>
+      <div><PostComposer /></div>
 
       {(popular.length > 0 || tag) && (
         <nav aria-label="Post tags" className="mt-6 flex flex-wrap gap-2">

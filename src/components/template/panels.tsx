@@ -198,7 +198,7 @@ const REASONS: [string, string][] = [
   ['malware', 'Malware or suspicious files'], ['spam', 'Spam'], ['inappropriate', 'Inappropriate content'], ['other', 'Something else'],
 ];
 
-export function ReportDialog({ targetType, targetId, onClose }: { targetType: 'template' | 'comment' | 'post'; targetId: string; onClose: () => void }) {
+export function ReportDialog({ targetType, targetId, onClose }: { targetType: 'template' | 'comment' | 'post' | 'post_comment'; targetId: string; onClose: () => void }) {
   const toast = useToast();
   const [reason, setReason] = useState('');
   const [details, setDetails] = useState('');
@@ -213,7 +213,7 @@ export function ReportDialog({ targetType, targetId, onClose }: { targetType: 't
     });
   };
   return (
-    <Dialog open onClose={onClose} title={`Report this ${targetType}`}>
+    <Dialog open onClose={onClose} title={`Report this ${targetType.replace('_', ' ')}`}>
       <form onSubmit={submit} className="flex flex-col gap-4">
         <fieldset className="m-0 flex flex-col gap-1 border-0 p-0">
           <legend className="sr-only">Reason</legend>

@@ -34,6 +34,11 @@ export default async function AdminPage(props: PageProps<'/admin'>) {
   const { data: reportedPosts } = postIds.length
     ? await db.from('posts').select('id, body, status, author:profiles!posts_author_id_fkey(username)').in('id', postIds)
     : { data: [] };
+  const commentIds = (reports ?? []).filter((r) => r.target_type === 'post_comment').map((r) => r.target_id as string);
+  const { data: reportedComments } = commentIds.length
+    ? await db.from('post_comments').select('id, body, status, author:profiles!post_comments_author_id_fkey(username)').in('id', commentIds)
+    : { data: [] };
+  const commentById = new Map(((reportedComments ?? []) as unknown as { id: string; body: string; status: string; author: { username: string } | null }[]).map((c) => [c.id, c]));
   const postById = new Map(((reportedPosts ?? []) as unknown as { id: string; body: string; status: string; author: { username: string } | null }[]).map((p) => [p.id, p]));
   const { data: files } = pending.length
     ? await db.from('template_files').select('template_id, original_name, size_bytes, scan_status, reject_reason').in('template_id', pending.map((p) => p.id))
@@ -90,6 +95,16 @@ export default async function AdminPage(props: PageProps<'/admin'>) {
                       {post.status === 'published' && <PostRemoveAction id={post.id} />}
                     </div>
                   ) : <p className="m-0 text-ink-3">The post no longer exists.</p>;
+                })()}
+                {r.target_type === 'post_comment' && (() => {
+                  const c = commentById.get(r.target_id as string);
+                  return c ? (
+                    <div className="flex flex-col gap-2 rounded-lg bg-surface-2 p-3">
+                      <p className="m-0 text-[13px] text-ink-3">Comment by @{c.author?.username ?? 'deleted'}{c.status === 'removed' ? ' · already removed' : ''}</p>
+                      <p className="m-0 break-words whitespace-pre-line">{c.body}</p>
+                      {c.status === 'published' && <PostRemoveAction id={c.id} kind="comment" />}
+                    </div>
+                  ) : <p className="m-0 text-ink-3">The comment no longer exists.</p>;
                 })()}
                 <ReportActions id={r.id as string} />
               </li>
