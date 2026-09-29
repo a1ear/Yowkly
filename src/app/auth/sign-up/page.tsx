@@ -18,6 +18,9 @@ export default function SignUpPage() {
         </p>
       </div>
       <OAuthButtons next="/onboarding" />
+      <p className="m-0 -mt-3 text-center text-xs text-ink-3">
+        By continuing with Google or GitHub you agree to the <Link href="/legal/terms" className="text-accent-ink underline">Terms</Link> and <Link href="/legal/privacy" className="text-accent-ink underline">Privacy Policy</Link>.
+      </p>
       <SignUpForm />
       <p className="m-0 text-center text-[13px] text-ink-2">
         Already have an account? <Link href="/auth/sign-in" className="font-medium text-accent-ink underline-offset-4 hover:underline">Sign in</Link>
