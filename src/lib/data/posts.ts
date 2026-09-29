@@ -6,11 +6,14 @@ export type Post = {
   id: string; body: string; tags: string[]; like_count: number; created_at: string;
   author_id: string; author_username: string; author_display_name: string; author_avatar_path: string | null;
   comment_count: number; dislike_count: number;
+  /** The best one or two comments, shown under the post without opening the thread. */
+  previews: PostComment[];
 };
 
 export type PostComment = {
   id: string; post_id: string; body: string; created_at: string;
   author_id: string; author_username: string; author_display_name: string; author_avatar_path: string | null;
+  like_count: number; dislike_count: number;
 };
 
 export const POST_PAGE_SIZE = 20;
@@ -32,7 +35,15 @@ export async function getPosts(p: { authorId?: string; tag?: string; page?: numb
   const from = ((p.page ?? 1) - 1) * POST_PAGE_SIZE;
   const res = await q.order('created_at', { ascending: false }).range(from, from + POST_PAGE_SIZE - 1);
   if (res.error) throw new Error(`Failed to load posts: ${res.error.message}`);
-  const rows = res.data as Post[];
+  const cards = res.data as Omit<Post, 'previews'>[];
+  // Previews are a nicety: if they fail to load the posts still show.
+  const byPost = new Map<string, PostComment[]>();
+  if (cards.length) {
+    const pre = await publicClient([POSTS_TAG]).rpc('post_comment_previews', { p_post_ids: cards.map((c) => c.id), p_per_post: 2 });
+    if (pre.error) console.error('[posts] previews', pre.error.message);
+    for (const c of (pre.data ?? []) as PostComment[]) byPost.set(c.post_id, [...(byPost.get(c.post_id) ?? []), c]);
+  }
+  const rows: Post[] = cards.map((c) => ({ ...c, previews: byPost.get(c.id) ?? [] }));
   return { rows, total: res.count ?? rows.length };
 }
 

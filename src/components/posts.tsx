@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState, useTransition } from 'react';
-import { addPostComment, createPost, deletePost, loadPostComments, postReactionStates, removePostComment, setPostReaction } from '@/app/actions/posts';
+import { addPostComment, commentReactionStates, createPost, deletePost, loadPostComments, postReactionStates, removePostComment, setCommentReaction, setPostReaction } from '@/app/actions/posts';
 import { Avatar } from './bits';
 import { Dialog } from './dialog';
 import { Icon } from './icons';
@@ -98,6 +98,19 @@ export function PostComposer({ onlyFor }: { onlyFor?: string }) {
 
 type Counts = { like: number; dislike: number };
 
+/** Tapping your current reaction takes it back; tapping the other one switches. */
+function nextReaction(current: Kind | undefined, counts: Counts, kind: Kind): { reaction: Kind | null; counts: Counts } {
+  const reaction = current === kind ? null : kind;
+  const c = { ...counts };
+  if (current) c[current] = Math.max(0, c[current] - 1);
+  if (reaction) c[reaction] += 1;
+  return { reaction, counts: c };
+}
+
+/** The two comments worth showing under a post: most liked first, newest breaks ties. */
+const bestTwo = (list: PostComment[]) =>
+  [...list].sort((a, b) => (b.like_count - b.dislike_count) - (a.like_count - a.dislike_count) || b.created_at.localeCompare(a.created_at)).slice(0, 2);
+
 /** A list of posts, each with like, dislike, comments, a report link and (on your own) delete. */
 export function PostList({ posts, emptyText }: { posts: Post[]; emptyText: string }) {
   const [me, setMe] = useState<string | null>(null);
@@ -116,14 +129,10 @@ export function PostList({ posts, emptyText }: { posts: Post[]; emptyText: strin
 
   const countsOf = (p: Post): Counts => counts[p.id] ?? { like: p.like_count, dislike: p.dislike_count };
 
-  /** Tapping your current reaction takes it back; tapping the other one switches. */
   const react = (post: Post, kind: Kind) => {
     if (!me) return toast({ text: 'Sign in to react to posts.', tone: 'error' });
     const before = { reaction: mine[post.id], counts: countsOf(post) };
-    const next = before.reaction === kind ? null : kind;
-    const c = { ...before.counts };
-    if (before.reaction) c[before.reaction] = Math.max(0, c[before.reaction] - 1);
-    if (next) c[next] += 1;
+    const { reaction: next, counts: c } = nextReaction(before.reaction, before.counts, kind);
     const put = (reaction: Kind | undefined, counts: Counts) => {
       setMine((m) => { const n = { ...m }; if (reaction) n[post.id] = reaction; else delete n[post.id]; return n; });
       setCounts((all) => ({ ...all, [post.id]: counts }));
@@ -168,6 +177,8 @@ function PostItem({ post, me, reaction, counts, onReact, onDeleted }: {
   const [reporting, setReporting] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [commentCount, setCommentCount] = useState(post.comment_count);
+  const [live, setLive] = useState<PostComment[] | null>(null);
+  const previews = live ? bestTwo(live) : post.previews;
   const own = me === post.author_id;
 
   const remove = () => start(async () => {
@@ -230,25 +241,88 @@ function PostItem({ post, me, reaction, counts, onReact, onDeleted }: {
         )}
       </footer>
       {reporting && <ReportDialog targetType="post" targetId={post.id} onClose={() => setReporting(false)} />}
-      {showComments && <PostComments postId={post.id} postAuthorId={post.author_id} me={me} onCount={(d) => setCommentCount((n) => Math.max(0, n + d))} />}
+      {!showComments && previews.length > 0 && (
+        <div className="flex flex-col gap-2 border-t border-line pt-3">
+          <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Top comments">
+            {previews.map((c) => (
+              <li key={c.id} className="flex gap-2.5">
+                <Link href={`/@${c.author_username}`} aria-label={`${c.author_display_name}'s profile`} className="mt-0.5 shrink-0">
+                  <Avatar name={c.author_display_name} path={c.author_avatar_path} seed={c.author_username} size={28} />
+                </Link>
+                <div className="min-w-0 rounded-2xl bg-surface-2 px-3.5 py-2">
+                  <Link href={`/@${c.author_username}`} className="text-[13px] font-semibold hover:text-accent-ink">{c.author_display_name}</Link>
+                  <p className="m-0 line-clamp-3 text-[14px] break-words whitespace-pre-line">{c.body}</p>
+                  {(c.like_count > 0 || c.dislike_count > 0) && (
+                    <span className="mt-0.5 flex items-center gap-3 text-xs text-ink-3">
+                      {c.like_count > 0 && <span className="inline-flex items-center gap-1"><Icon name="thumbUp" size={12} />{formatCompact(c.like_count)}</span>}
+                      {c.dislike_count > 0 && <span className="inline-flex items-center gap-1"><Icon name="thumbDown" size={12} />{formatCompact(c.dislike_count)}</span>}
+                    </span>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+          <button type="button" onClick={() => setShowComments(true)} className="self-start rounded-md px-1 py-2 text-[13px] font-medium text-ink-2 hover:text-accent-ink">
+            {commentCount > previews.length ? `View all ${formatCompact(commentCount)} comments` : 'Reply or react'}
+          </button>
+        </div>
+      )}
+      {showComments && <PostComments postId={post.id} postAuthorId={post.author_id} me={me} onList={setLive} onCount={(d) => setCommentCount((n) => Math.max(0, n + d))} />}
     </article>
   );
 }
 
+function MiniReaction({ kind, active, count, onClick }: { kind: Kind; active: boolean; count: number; onClick: () => void }) {
+  const label = kind === 'like' ? 'Like' : 'Dislike';
+  return (
+    <button type="button" onClick={onClick} aria-pressed={active} aria-label={`${active ? `Remove your ${label.toLowerCase()}` : `${label} this comment`}, ${count} so far`}
+            className={`-my-1 inline-flex min-h-8 min-w-8 items-center justify-center gap-1 rounded-md px-1.5 hover:bg-surface-3 ${active ? 'text-accent-ink' : 'text-ink-3'}`}>
+      <Icon name={kind === 'like' ? 'thumbUp' : 'thumbDown'} size={14} className={active ? 'fill-current' : ''} />
+      {count > 0 && <span className="font-mono">{formatCompact(count)}</span>}
+    </button>
+  );
+}
+
 /** Comments under one post: loaded when opened, oldest first, with a box to add yours. */
-function PostComments({ postId, postAuthorId, me, onCount }: { postId: string; postAuthorId: string; me: string | null; onCount: (delta: number) => void }) {
+function PostComments({ postId, postAuthorId, me, onCount, onList }: {
+  postId: string; postAuthorId: string; me: string | null; onCount: (delta: number) => void; onList: (list: PostComment[]) => void;
+}) {
   const toast = useToast();
   const pathname = usePathname();
   const [comments, setComments] = useState<PostComment[] | null>(null);
+  const [mine, setMine] = useState<Record<string, Kind>>({});
   const [text, setText] = useState('');
   const [pending, start] = useTransition();
   const [reporting, setReporting] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
-    loadPostComments(postId).then((c) => { if (live) setComments(c); });
+    loadPostComments(postId).then(async (c) => {
+      if (!live) return;
+      setComments(c);
+      onList(c);
+      const r = await commentReactionStates(c.map((x) => x.id));
+      if (live) setMine(r);
+    });
     return () => { live = false; };
+    // onList is a state setter from the parent, stable for the life of the post.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [postId]);
+
+  const update = (next: PostComment[]) => { setComments(next); onList(next); };
+  const reactTo = (c: PostComment, kind: Kind) => {
+    if (!me) return toast({ text: 'Sign in to react to comments.', tone: 'error' });
+    const before = { reaction: mine[c.id], counts: { like: c.like_count, dislike: c.dislike_count } };
+    const { reaction, counts } = nextReaction(before.reaction, before.counts, kind);
+    const put = (r: Kind | undefined, k: Counts) => {
+      setMine((m) => { const n = { ...m }; if (r) n[c.id] = r; else delete n[c.id]; return n; });
+      setComments((list) => (list ?? []).map((x) => (x.id === c.id ? { ...x, like_count: k.like, dislike_count: k.dislike } : x)));
+    };
+    put(reaction ?? undefined, counts);
+    setCommentReaction(c.id, reaction).then((r) => {
+      if (!r.ok) { put(before.reaction, before.counts); toast({ text: r.error, tone: 'error' }); }
+    });
+  };
 
   const send = (e: React.FormEvent) => {
     e.preventDefault();
@@ -257,7 +331,7 @@ function PostComments({ postId, postAuthorId, me, onCount }: { postId: string; p
     start(async () => {
       const r = await addPostComment(postId, body);
       if (!r.ok) return toast({ text: r.error, tone: 'error' });
-      setComments((list) => [...(list ?? []), r.data]);
+      update([...(comments ?? []), r.data]);
       setText('');
       onCount(1);
     });
@@ -265,7 +339,7 @@ function PostComments({ postId, postAuthorId, me, onCount }: { postId: string; p
   const remove = (c: PostComment) => start(async () => {
     const r = await removePostComment(c.id);
     if (!r.ok) return toast({ text: r.error, tone: 'error' });
-    setComments((list) => (list ?? []).filter((x) => x.id !== c.id));
+    update((comments ?? []).filter((x) => x.id !== c.id));
     onCount(-1);
   });
 
@@ -287,6 +361,8 @@ function PostComments({ postId, postAuthorId, me, onCount }: { postId: string; p
                 </div>
                 <div className="flex items-center gap-3 px-2 text-xs text-ink-3">
                   <time dateTime={c.created_at}>{timeAgo(c.created_at)}</time>
+                  <MiniReaction kind="like" active={mine[c.id] === 'like'} count={c.like_count} onClick={() => reactTo(c, 'like')} />
+                  <MiniReaction kind="dislike" active={mine[c.id] === 'dislike'} count={c.dislike_count} onClick={() => reactTo(c, 'dislike')} />
                   {(me === c.author_id || me === postAuthorId) ? (
                     <button type="button" disabled={pending} onClick={() => remove(c)} className="hover:text-danger">Delete</button>
                   ) : (

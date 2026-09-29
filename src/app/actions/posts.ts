@@ -39,25 +39,26 @@ export async function deletePost(postId: string, reason?: string): Promise<Actio
 }
 
 const kindSchema = z.enum(['like', 'dislike']).nullable();
+type ReactionTarget = { table: 'post_likes'; column: 'post_id' } | { table: 'post_comment_likes'; column: 'comment_id' };
 
 /**
- * One reaction per person per post: like, dislike, or none (null) to take it back.
- * Switching updates your existing row. The button is optimistic; the posts cache
- * is refreshed so a reload shows the real counts next to your reaction.
+ * One reaction per person: like, dislike, or none (null) to take it back.
+ * Switching updates the existing row. The buttons are optimistic; the posts
+ * cache is refreshed so a reload shows the real counts next to your reaction.
  */
-export async function setPostReaction(postId: string, kind: 'like' | 'dislike' | null): Promise<ActionResult> {
+async function react(t: ReactionTarget, id: string, kind: 'like' | 'dislike' | null): Promise<ActionResult> {
   const k = kindSchema.safeParse(kind);
-  if (!uuid.safeParse(postId).success || !k.success) return fail('Invalid post.');
+  if (!uuid.safeParse(id).success || !k.success) return fail('Invalid request.');
   const a = await authed('like');
   if ('error' in a) return a.error;
   if (k.data === null) {
-    const del = await a.db.from('post_likes').delete().eq('post_id', postId).eq('user_id', a.uid);
+    const del = await a.db.from(t.table).delete().eq(t.column, id).eq('user_id', a.uid);
     if (del.error) return fail(toUserError(del.error));
   } else {
-    const change = () => a.db.from('post_likes').update({ kind: k.data }).eq('post_id', postId).eq('user_id', a.uid).select('post_id');
+    const change = () => a.db.from(t.table).update({ kind: k.data }).eq(t.column, id).eq('user_id', a.uid).select(t.column);
     let res = await change();
     if (!res.error && !res.data?.length) {
-      const ins = await a.db.from('post_likes').insert({ post_id: postId, kind: k.data });
+      const ins = await a.db.from(t.table).insert({ [t.column]: id, kind: k.data });
       // Two quick taps: the other request inserted first, so change that row instead.
       if (ins.error?.code === '23505') res = await change();
       else if (ins.error) return fail(toUserError(ins.error));
@@ -66,6 +67,14 @@ export async function setPostReaction(postId: string, kind: 'like' | 'dislike' |
   }
   updateTag(POSTS_TAG);
   return { ok: true, data: null };
+}
+
+export async function setPostReaction(postId: string, kind: 'like' | 'dislike' | null): Promise<ActionResult> {
+  return react({ table: 'post_likes', column: 'post_id' }, postId, kind);
+}
+
+export async function setCommentReaction(commentId: string, kind: 'like' | 'dislike' | null): Promise<ActionResult> {
+  return react({ table: 'post_comment_likes', column: 'comment_id' }, commentId, kind);
 }
 
 /** The signed-in user's reaction to each of these posts. Read-only; RLS scopes it to the caller. */
@@ -110,4 +119,16 @@ export async function removePostComment(commentId: string, reason?: string): Pro
   if (error) return fail(toUserError(error));
   updateTag(POSTS_TAG);
   return { ok: true, data: null };
+}
+
+/** The signed-in user's reaction to each of these comments. Read-only; RLS scopes it to the caller. */
+export async function commentReactionStates(commentIds: string[]): Promise<Record<string, 'like' | 'dislike'>> {
+  const ids = z.array(uuid).max(100).safeParse(commentIds);
+  if (!ids.success || !ids.data.length) return {};
+  const db = await userClient();
+  const { data } = await db.auth.getClaims();
+  const me = data?.claims?.sub as string | undefined;
+  if (!me) return {};
+  const { data: rows } = await db.from('post_comment_likes').select('comment_id, kind').eq('user_id', me).in('comment_id', ids.data);
+  return Object.fromEntries(((rows ?? []) as { comment_id: string; kind: 'like' | 'dislike' }[]).map((r) => [r.comment_id, r.kind]));
 }

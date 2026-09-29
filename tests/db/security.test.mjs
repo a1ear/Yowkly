@@ -458,6 +458,41 @@ test('post comments and dislikes: validated, limited, removable by the right peo
   fails(await comment(u.carol, post, 'too late'), /Post not found/);
 });
 
+test('comment reactions and previews: one reaction each, private, counted; previews are the best two', async () => {
+  const [{ id: post }] = ok(await as(db, u.alice, `select public.create_post('Preview me', '{}') as id`));
+  const comment = async (uid, body) => ok(await as(db, uid, `select public.create_post_comment($1, $2) as id`, [post, body]))[0].id;
+  const c1 = await comment(u.mod, 'first');
+  const c2 = await comment(u.carol, 'second');
+  const c3 = await comment(u.alice, 'third');
+  const counts = async (id) => (await sql(`select like_count, dislike_count from public.post_comments where id = $1`, [id]))[0];
+
+  ok(await as(db, u.bob, `insert into public.post_comment_likes (comment_id) values ($1)`, [c2]));
+  ok(await as(db, u.alice, `insert into public.post_comment_likes (comment_id) values ($1)`, [c2]));
+  ok(await as(db, u.carol, `insert into public.post_comment_likes (comment_id, kind) values ($1, 'dislike')`, [c1]));
+  assert.deepEqual(Object.values(await counts(c2)), [2, 0]);
+  assert.deepEqual(Object.values(await counts(c1)), [0, 1]);
+
+  fails(await as(db, u.bob, `insert into public.post_comment_likes (comment_id) values ($1)`, [c2]), /duplicate key/, 'react twice');
+  fails(await as(db, u.bob, `insert into public.post_comment_likes (comment_id, user_id) values ($1, $2)`, [c3, u.carol]), /permission denied/, 'react as someone else');
+  fails(await as(db, u.mod, `insert into public.post_comment_likes (comment_id, kind) values ($1, 'love')`, [c3]), /violates check|invalid/, 'unknown reaction');
+  fails(await as(db, null, `select 1 from public.post_comment_likes`), /permission denied/, 'anon reads reactions');
+  none(await as(db, u.alice, `select 1 from public.post_comment_likes where user_id = $1`, [u.bob]), 'read someone else\'s reaction');
+  ok(await as(db, u.bob, `update public.post_comment_likes set kind = 'dislike' where comment_id = $1`, [c2]));
+  assert.deepEqual(Object.values(await counts(c2)), [1, 1]);
+  none(await as(db, u.carol, `update public.post_comment_likes set kind = 'like' where user_id = $1 returning 1`, [u.bob]), 'switch someone else\'s reaction');
+  ok(await as(db, u.bob, `delete from public.post_comment_likes where comment_id = $1`, [c2]));
+  assert.deepEqual(Object.values(await counts(c2)), [1, 0]);
+
+  // Previews: at most two per post, best first, removed comments never included.
+  const previews = async (per) => ok(await as(db, null, `select id, like_count from public.post_comment_previews(array[$1]::uuid[], $2)`, [post, per]));
+  assert.deepEqual((await previews(2)).map((r) => r.id), [c2, c3]);   // c2 has +1, then the newest of the rest
+  assert.equal((await previews(99)).length, 3, 'capped at three per post');
+  ok(await as(db, u.carol, `select public.delete_post_comment($1)`, [c2]));
+  assert.deepEqual((await previews(2)).map((r) => r.id), [c3, c1]);   // c1 is at -1, c3 at 0
+  assert.ok(!(await previews(3)).some((r) => r.id === c2), 'removed comment in previews');
+  fails(await as(db, u.bob, `insert into public.post_comment_likes (comment_id) values ($1)`, [c2]), /row-level security/, 'react to a removed comment');
+});
+
 test('reports are private to the reporter and moderators', async () => {
   ok(await as(db, u.bob, `insert into public.reports (target_type, target_id, reason) values ('template', $1, 'broken')`, [s.tpl]));
   none(await as(db, u.alice, `select id from public.reports`));
