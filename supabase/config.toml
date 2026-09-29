@@ -242,6 +242,12 @@ otp_expiry = 3600
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
+# Sign-up confirmation email: links to /auth/confirm on the site (paste the same HTML into
+# the hosted project under Authentication > Emails > Confirm sign up).
+[auth.email.template.confirmation]
+subject = "Confirm your Yowkly email"
+content_path = "./supabase/templates/confirmation.html"
+
 # Uncomment to customize email template
 # [auth.email.template.invite]
 # subject = "You have been invited"

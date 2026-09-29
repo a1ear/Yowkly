@@ -1,0 +1,9 @@
+<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#1b1b1f">
+  <h2 style="margin:0 0 12px;font-size:22px">Confirm your email</h2>
+  <p style="margin:0 0 20px;line-height:1.5">Welcome to Yowkly. Confirm your address to activate your account and get your 100 yowkbits.</p>
+  <p style="margin:0 0 20px">
+    <a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email"
+       style="display:inline-block;background:#111;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600">Confirm my email</a>
+  </p>
+  <p style="margin:0;font-size:13px;color:#666;line-height:1.5">If you didn't sign up, you can ignore this email.</p>
+</div>

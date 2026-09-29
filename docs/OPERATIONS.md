@@ -29,6 +29,7 @@ How to deploy, monitor, back up and restore Yowkly. "Done" means this runbook ha
    ```
    Then in the dashboard:
    - **Auth → URL configuration:** site URL `https://<domain>`, redirect `https://<domain>/auth/callback`
+   - **Auth → Emails → Confirm sign up:** paste `supabase/templates/confirmation.html` (subject "Confirm your Yowkly email"). Its button opens `/auth/confirm` on the site, where one click confirms the account and lands on `/auth/confirmed`. Without this step the default Supabase email still works, but it goes through `/auth/callback` and fails if the link is opened in a different browser than the one used to sign up.
    - **Auth → Providers:** GitHub and Google OAuth apps with callback `https://<ref>.supabase.co/auth/v1/callback` (optional; email works without them)
    - **Auth → Attack protection:** enable CAPTCHA (Cloudflare Turnstile)
    - **Auth → SMTP:** Resend (see the limits above)

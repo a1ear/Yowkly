@@ -62,13 +62,27 @@ export async function signUp(_: AuthState, form: FormData): Promise<AuthState> {
   const db = await userClient();
   const { error } = await db.auth.signUp({
     ...parsed.data,
-    options: { emailRedirectTo: callback('/onboarding') },
+    options: { emailRedirectTo: callback('/auth/confirmed') },
   });
   if (error && error.code !== 'user_already_exists') {
     return { error: error.code === 'weak_password' ? 'That password is too common. Pick another.' : 'Could not create the account. Try again.', email: parsed.data.email };
   }
   // Identical response whether or not the address is already registered.
   return { message: `Check ${parsed.data.email} for a link to confirm your account.` };
+}
+
+/**
+ * The "Confirm my email" button. The email links to a page on this site (/auth/confirm)
+ * instead of using up the one-time token on a plain GET, so mail scanners that pre-open
+ * links can't burn it, and it works in whichever browser or app opens the link.
+ */
+export async function confirmEmail(form: FormData) {
+  const tokenHash = String(form.get('token_hash') ?? '');
+  if (!/^[A-Za-z0-9_-]{16,200}$/.test(tokenHash)) redirect('/auth/sign-in?error=link');
+  const db = await userClient();
+  const { error } = await db.auth.verifyOtp({ type: 'email', token_hash: tokenHash });
+  if (error) redirect('/auth/sign-in?error=link');
+  redirect('/auth/confirmed');
 }
 
 export async function sendMagicLink(_: AuthState, form: FormData): Promise<AuthState> {
