@@ -11,7 +11,7 @@ import { SafeMarkdown } from '@/components/safe-markdown';
 import { LivePreview } from '@/components/template/live-preview';
 import { DetailTabs } from '@/components/template/detail-tabs';
 import { Comments } from '@/components/template/comments';
-import { ActionRow, DownloadPanel, FollowButton, ViewerProvider, VoteModule } from '@/components/template/panels';
+import { ActionRow, DownloadPanel, FollowButton, OwnerTools, ViewerProvider, VoteModule } from '@/components/template/panels';
 import { displayTools, mediaUrl } from '@/lib/labels';
 import { formatBytes, formatLongDate } from '@/lib/format';
 
@@ -171,6 +171,7 @@ export default async function TemplatePage(props: PageProps<'/t/[slug]'>) {
               </Link>
               <FollowButton ownerId={card.owner_id} />
             </div>
+            <OwnerTools ownerId={card.owner_id} templateId={card.id} status={card.status} />
             <DownloadPanel versions={d.versions} files={d.files} currentVersionId={d.currentVersionId} licenses={licenses} links={d.links} />
             <ActionRow likeCount={card.like_count} title={card.title} />
             <VoteModule voteCount={d.voteCount} />

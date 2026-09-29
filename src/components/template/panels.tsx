@@ -31,6 +31,30 @@ export function ViewerProvider({ templateId, ownerId, slug, licenseCode, childre
 
 const signInHref = (slug: string) => `/auth/sign-in?next=${encodeURIComponent(`/t/${slug}`)}`;
 
+// ─────────────────────────────────────────────────────────── owner tools
+/**
+ * Only the creator sees these. The server re-checks ownership on every save
+ * (RLS on templates and the version RPCs); this just puts the controls where
+ * the creator is looking.
+ */
+export function OwnerTools({ ownerId, templateId, status }: { ownerId: string; templateId: string; status: string }) {
+  const { state } = useViewer();
+  if (!state || state.uid !== ownerId) return null;
+  return (
+    <div className="flex flex-col gap-2 rounded-xl bg-surface-1 p-3.5 shadow-[inset_0_0_0_1px_var(--line)]">
+      <div className="flex items-center justify-between gap-2">
+        <span className="eyebrow">Your template</span>
+        {status === 'pending_review' && <span className="font-mono text-[11px] text-warning">Waiting for review</span>}
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <Link href={`/upload/${templateId}?step=1`} className="btn btn-secondary h-10"><Icon name="settings" size={15} />Edit details</Link>
+        <Link href={`/upload/${templateId}?step=2`} className="btn btn-secondary h-10"><Icon name="upload" size={15} />New version</Link>
+      </div>
+      <p className="m-0 text-[12px] text-ink-3">Title, description, tags, links and images can change any time. Files and license change through a new version, so past downloads keep what they got.</p>
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────── follow
 export function FollowButton({ ownerId }: { ownerId: string }) {
   const { state, set, slug } = useViewer();

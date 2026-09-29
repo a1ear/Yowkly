@@ -91,7 +91,8 @@ export default async function UploadStepPage(props: PageProps<'/upload/[id]'>) {
             <BasicsForm templateId={t.id} categories={categories} tags={tags}
               initial={{ title: t.title, tagline: t.tagline ?? '', description: t.description ?? '', categoryId: t.category_id, tagIds: d.tagIds }} />
           )}
-          {needsVersion && <NewVersion templateId={t.id} latest={d.latestPublished?.version ?? null} step={step} />}
+          {needsVersion && <NewVersion templateId={t.id} latest={d.latestPublished?.version ?? null} step={step}
+            doneHref={t.status === 'published' || t.status === 'unlisted' ? `/t/${t.slug}` : '/dashboard'} />}
           {step === 2 && draft && <SourceStep templateId={t.id} versionId={draft.id} files={d.files} links={d.links} demoUrl={t.demo_url} />}
           {step === 3 && <MediaStep templateId={t.id} media={d.media} isMobile={isMobile} />}
           {step === 4 && draft && (

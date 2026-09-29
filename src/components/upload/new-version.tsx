@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 import { startNewVersion } from '@/app/actions/upload';
@@ -11,7 +12,7 @@ function bump(v: string | null) {
 }
 
 /** Published versions are immutable, so changing files means starting a new version. */
-export function NewVersion({ templateId, latest, step }: { templateId: string; latest: string | null; step: number }) {
+export function NewVersion({ templateId, latest, step, doneHref }: { templateId: string; latest: string | null; step: number; doneHref: string }) {
   const router = useRouter();
   const [version, setVersion] = useState(bump(latest));
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +40,12 @@ export function NewVersion({ templateId, latest, step }: { templateId: string; l
         <button className="btn btn-primary" disabled={pending}>{pending ? 'Creating…' : 'Create draft version'}</button>
       </form>
       {error && <p role="alert" className="m-0 flex items-center gap-2 text-danger"><Icon name="alert" size={16} />{error}</p>}
+      {/* Editing details or images doesn't need a new version. */}
+      <div className="flex flex-wrap items-center gap-2 border-t border-line pt-4 text-[13px] text-ink-2">
+        <span>Only changing the title, text, tags or images?</span>
+        <Link href={`/upload/${templateId}?step=3`} className="btn btn-secondary h-9 px-3">Edit images instead</Link>
+        <Link href={doneHref} className="btn btn-ghost h-9 px-3">Done editing</Link>
+      </div>
     </div>
   );
 }

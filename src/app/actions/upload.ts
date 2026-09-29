@@ -1,13 +1,23 @@
 'use server';
 import { redirect } from 'next/navigation';
 import { after } from 'next/server';
-import { revalidateTag } from 'next/cache';
+import { revalidateTag, updateTag } from 'next/cache';
 import { z } from 'zod';
 import { authed, fail, toUserError, type ActionResult } from '@/lib/actions';
 import { deleteObjects, presignUpload } from '@/lib/r2';
 import { triggerScan } from '@/lib/scan-trigger';
 import { templateTag } from '@/lib/data/template';
 import { publicEnv } from '@/lib/env';
+
+/**
+ * After the creator edits a template (details, links, images), their next page
+ * load must show it: expire the template's own data and the listing/slug caches
+ * now (updateTag), instead of serving one stale view first.
+ */
+function refreshTemplate(templateId: string) {
+  updateTag(templateTag(templateId));
+  updateTag('templates');
+}
 
 export type WizardState = { error?: string; ok?: boolean } | null;
 const uuid = z.uuid();
@@ -46,7 +56,7 @@ export async function saveBasics(templateId: string | null, _: WizardState, form
   if (!upd.data?.length) return { error: 'Template not found.' };
   const tags = await a.db.rpc('set_template_tags', { p_template: id, p_tag_ids: b.tagIds });
   if (tags.error) return { error: toUserError(tags.error) };
-  revalidateTag(templateTag(id), 'max');
+  refreshTemplate(id);
   redirect(`/upload/${id}?step=2`);
 }
 
@@ -94,6 +104,7 @@ export async function saveLinks(templateId: string, _: WizardState, form: FormDa
     const ins = await a.db.from('template_links').insert(links.map((l) => ({ template_id: templateId, ...l })));
     if (ins.error) return { error: toUserError(ins.error) };
   }
+  refreshTemplate(templateId);
   redirect(`/upload/${templateId}?step=3`);
 }
 
@@ -172,7 +183,7 @@ export async function registerMedia(input: z.input<typeof media>): Promise<Actio
     p_template: m.templateId, p_path: m.path, p_kind: m.kind, p_device: m.device, p_alt: m.alt, p_width: m.width, p_height: m.height,
   });
   if (error) return fail(toUserError(error));
-  revalidateTag(templateTag(m.templateId), 'max');
+  refreshTemplate(m.templateId);
   return { ok: true, data: { id: data as string } };
 }
 
@@ -181,19 +192,22 @@ export async function updateMediaAlt(mediaId: string, alt: string): Promise<Acti
   if (!parsed.success || !uuid.safeParse(mediaId).success) return fail(parsed.error?.issues[0].message ?? 'Invalid image.');
   const a = await authed('write');
   if ('error' in a) return a.error;
-  const res = await a.db.from('template_media').update({ alt_text: parsed.data }).eq('id', mediaId).select('id');
+  const res = await a.db.from('template_media').update({ alt_text: parsed.data }).eq('id', mediaId).select('template_id');
   if (res.error) return fail(toUserError(res.error));
-  return res.data?.length ? { ok: true, data: null } : fail('Image not found.');
+  if (!res.data?.length) return fail('Image not found.');
+  refreshTemplate(res.data[0].template_id as string);
+  return { ok: true, data: null };
 }
 
 export async function removeMedia(mediaId: string): Promise<ActionResult> {
   if (!uuid.safeParse(mediaId).success) return fail('Invalid image.');
   const a = await authed('write');
   if ('error' in a) return a.error;
-  const res = await a.db.from('template_media').delete().eq('id', mediaId).select('path');
+  const res = await a.db.from('template_media').delete().eq('id', mediaId).select('path, template_id');
   if (res.error) return fail(toUserError(res.error));
   if (!res.data?.length) return fail('Image not found.');
   await deleteObjects([{ bucket: 'media', storage_path: res.data[0].path as string }]);
+  refreshTemplate(res.data[0].template_id as string);
   return { ok: true, data: null };
 }
 
