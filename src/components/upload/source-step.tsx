@@ -146,7 +146,7 @@ export function SourceStep({ templateId, versionId, files, links, demoUrl }: {
                     </div>
                   )}
                   {(r.kind === 'failed' || (r.kind === 'saved' && r.file.reject_reason)) && (
-                    <p role="alert" className="m-0 text-[13px] text-danger">{r.kind === 'failed' ? r.error : r.file.reject_reason} Remove it and upload again.</p>
+                    <p role="alert" className="m-0 text-[13px] text-danger">{r.kind === 'failed' ? `${r.error} Remove it and try again.` : `${r.file.reject_reason} Remove it from this version.`}</p>
                   )}
                 </li>
               );

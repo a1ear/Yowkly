@@ -102,6 +102,8 @@ async function processJob(job) {
     });
     // Rejected or infected bytes never stay around.
     if (status !== 'clean' && !r.error) await removeFromQuarantine(job.storage_path);
+    if (status !== 'clean') console.log(`[scan] ${status} ${job.id} ${job.original_name}: ${extra.reason}`);
+    if (r.error) console.error(`[scan] could not record the result for ${job.id}: ${r.error.message}`);
     return r;
   };
   try {
