@@ -3,6 +3,12 @@ import type { NextConfig } from 'next';
 const supabase = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || 'http://127.0.0.1:54321';
 const supabaseWs = supabase.replace(/^http/, 'ws');
 const media = process.env.NEXT_PUBLIC_MEDIA_URL?.trim() ? new URL(process.env.NEXT_PUBLIC_MEDIA_URL.trim()).origin : '';
+// The media bucket must be served from its PUBLIC address (r2.dev or a custom
+// domain). The *.r2.cloudflarestorage.com API address only accepts signed
+// requests, so every image would show as broken.
+if (/\.r2\.cloudflarestorage\.com$/.test(media.replace(/^https?:\/\//, ''))) {
+  throw new Error('NEXT_PUBLIC_MEDIA_URL must be the PUBLIC address of the media bucket (R2 > yowkly-media > Settings > Public Development URL, https://pub-….r2.dev), not the private S3 API address ' + media);
+}
 // Browsers PUT uploads straight to R2 with pre-signed URLs.
 const r2 = process.env.R2_ENDPOINT?.trim() ? new URL(process.env.R2_ENDPOINT.trim()).origin
   : process.env.R2_ACCOUNT_ID?.trim() ? `https://${process.env.R2_ACCOUNT_ID.trim()}.r2.cloudflarestorage.com` : 'https://*.r2.cloudflarestorage.com';
