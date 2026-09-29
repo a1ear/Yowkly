@@ -210,6 +210,18 @@ test('only moderators moderate, and every action is logged immutably', async () 
   assert.ok(notes.some((n) => n.type === 'upload_approved'));
 });
 
+test('search matches part of a word, ignores case, and only lists published work', async () => {
+  const [t] = await sql(`select title from public.templates where id = $1`, [s.tpl]);
+  const word = t.title.toLowerCase().split(/\s+/)[0];
+  for (const part of [word, word.slice(0, 2), word.slice(0, 1)]) {
+    const hit = ok(await as(db, null, `select id from public.template_cards where search_text ilike $1`, [`%${part}%`]));
+    assert.ok(hit.some((r) => r.id === s.tpl), `"${part}" should find "${t.title}"`);
+  }
+  await sql(`update public.templates set status = 'draft' where id = $1`, [s.tpl]);
+  none(await as(db, null, `select id from public.template_cards where id = $1`, [s.tpl]), 'anon reads an unpublished card');
+  await sql(`update public.templates set status = 'published' where id = $1`, [s.tpl]);
+});
+
 test('published versions are immutable', async () => {
   none(await as(db, u.alice, `update public.template_versions set changelog = 'rewritten' where id = $1 returning id`, [s.ver]));
   fails(await db.query(`update public.template_versions set changelog = 'rewritten' where id = $1`, [s.ver])

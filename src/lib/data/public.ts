@@ -85,6 +85,20 @@ export type ExploreParams = z.infer<typeof exploreParams>;
 
 export const PAGE_SIZE = 24;
 
+const TAG_SLUG = /^[a-z0-9.-]+$/;
+
+/**
+ * Splits a search into lower-cased words that are safe to place inside a PostgREST
+ * filter: only letters, digits and . + # - survive (no commas, quotes, parentheses
+ * or wildcards), so a search can never add filters of its own. Part of a word is
+ * enough: "my" finds "My portfolio".
+ */
+export function searchWords(q: string | undefined) {
+  return (q ?? '').toLowerCase().split(/\s+/)
+    .map((w) => w.replace(/[^\p{L}\p{N}.+#-]/gu, '').slice(0, 40))
+    .filter(Boolean).slice(0, 6);
+}
+
 export async function exploreTemplates(p: ExploreParams) {
   let q = publicClient(['templates'])
     .from('template_cards')
@@ -94,7 +108,10 @@ export async function exploreTemplates(p: ExploreParams) {
   if (p.tag.length) q = q.contains('tag_slugs', p.tag);
   if (p.tool.length) q = q.overlaps('tools', p.tool);
   if (p.commercial) q = q.eq('allows_commercial', true);
-  if (p.q) q = q.textSearch('search_tsv', p.q, { type: 'websearch', config: 'english' });
+  // Every word must appear somewhere in the title, tagline or description (or be a tag).
+  for (const w of searchWords(p.q)) {
+    q = q.or(TAG_SLUG.test(w) ? `search_text.ilike.*${w}*,tag_slugs.cs.{${w}}` : `search_text.ilike.*${w}*`);
+  }
   const order = {
     trending: ['hot_score', false],
     newest: ['published_at', false],

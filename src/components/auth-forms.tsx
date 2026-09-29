@@ -24,7 +24,7 @@ function PasswordField({ label, error, onValue, ...input }: { label: string; err
                onChange={(e) => onValue?.(e.target.value)} {...input} />
         <button type="button" onClick={() => setShown((v) => !v)} aria-pressed={shown} aria-label={shown ? 'Hide password' : 'Show password'}
                 className="absolute inset-y-0 right-0 inline-flex w-11 items-center justify-center rounded-r-md text-ink-3 hover:text-ink">
-          <Icon name={shown ? 'eye' : 'lock'} size={17} key={String(shown)} className="icon-swap" />
+          <Icon name={shown ? 'eyeOff' : 'eye'} size={17} key={String(shown)} className="icon-swap" />
         </button>
       </span>
     </label>

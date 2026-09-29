@@ -22,7 +22,12 @@ export function ProfileFollow({ userId, username }: { userId: string; username: 
   }, [userId]);
 
   if (!state) return <span className="skeleton h-11 w-28" />;
-  if (state.me === userId) return <Link href="/settings" className="btn btn-secondary"><Icon name="settings" size={16} />Edit profile</Link>;
+  if (state.me === userId) return (
+    <div className="flex flex-wrap gap-2">
+      <Link href="/dashboard" className="btn btn-primary"><Icon name="folder" size={16} />My submissions</Link>
+      <Link href="/settings" className="btn btn-secondary"><Icon name="settings" size={16} />Edit profile</Link>
+    </div>
+  );
   if (!state.me) return <Link href={`/auth/sign-in?next=/@${username}`} className="btn btn-primary">Follow</Link>;
   return (
     <button type="button" disabled={pending} aria-pressed={state.following}

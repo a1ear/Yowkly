@@ -7,6 +7,17 @@ import { createServerClient } from '@supabase/ssr';
 const PRIVATE = ['/dashboard', '/settings', '/upload', '/notifications', '/for-you', '/admin', '/onboarding'];
 
 export async function proxy(request: NextRequest) {
+  // Supabase sends the sign-up link to the site root (with ?code=) when its redirect
+  // allow-list doesn't contain /auth/callback. Hand the code to the callback so the
+  // person ends on the "Email confirmed" page instead of the home page.
+  const code = request.nextUrl.searchParams.get('code');
+  if (request.nextUrl.pathname === '/' && code) {
+    const url = request.nextUrl.clone();
+    url.pathname = '/auth/callback';
+    url.search = `?code=${encodeURIComponent(code)}&next=${encodeURIComponent('/auth/confirmed')}`;
+    return NextResponse.redirect(url);
+  }
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
