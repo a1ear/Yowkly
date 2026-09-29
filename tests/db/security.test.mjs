@@ -270,6 +270,27 @@ test('voting rules: no self-votes, no brand-new or unverified accounts, one vote
   assert.equal(n.e, 'too_new');
 });
 
+test('voting does not depend on downloadable files: a demo-only template can be voted on', async () => {
+  const [row] = ok(await as(db, u.alice, `select * from public.create_template('Demo Only — Landing Concept', $1::smallint)`, [s.websites]));
+  const t = row.template_id;
+  const dana = await createUser(db, { email: 'dana@test.dev' }); // a voter no other test looks at
+  const [m] = ok(await as(db, u.alice, `select public.prepare_media_upload($1, 'image/webp', 100000) as path`, [t]));
+  ok(await as(db, u.alice, `select public.register_media($1, $2, 'cover', 'desktop', 'Landing concept preview', 1600, 1000)`, [t, m.path]));
+  ok(await as(db, u.alice, `update public.templates set demo_url = 'https://example.com/demo' where id = $1`, [t]));
+  ok(await as(db, u.alice, `update public.template_versions set license_code = 'MIT' where id = $1`, [row.version_id]));
+  assert.equal((await sql(`select count(*)::int as n from public.template_files where template_id = $1`, [t]))[0].n, 0, 'the template has no files');
+
+  const eligibility = (uid) => as(db, uid, `select public.vote_eligibility($1) as e`, [t]).then((r) => ok(r)[0].e);
+  ok(await as(db, u.alice, `select public.publish_version($1, true)`, [row.version_id]));
+  assert.equal(await eligibility(dana), 'not_published', 'nobody votes before approval');
+  ok(await as(db, u.mod, `select public.moderate_template($1, 'approve', null)`, [t]));
+
+  assert.equal(await eligibility(dana), 'ok', 'no files needed to vote');
+  const [v] = ok(await as(db, dana, `select * from public.cast_vote($1)`, [t]));
+  assert.equal(v.vote_count, 1);
+  assert.equal((await sql(`select count(*)::int as n from public.template_files where template_id = $1`, [t]))[0].n, 0);
+});
+
 test('votes cannot be forged, edited, retracted or read by others', async () => {
   fails(await as(db, u.carol, `insert into public.votes (user_id, template_id) values ($1, $2)`, [u.bob, s.tpl]),
         /permission denied/, 'direct insert as someone else');
