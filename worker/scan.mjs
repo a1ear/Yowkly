@@ -40,8 +40,20 @@ const db = createClient(url, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSes
 if ((!env.R2_ACCOUNT_ID && !env.R2_ENDPOINT) || !env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY) throw new Error('R2_ACCOUNT_ID (or R2_ENDPOINT), R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY are required');
 const r2 = new AwsClient({ accessKeyId: env.R2_ACCESS_KEY_ID, secretAccessKey: env.R2_SECRET_ACCESS_KEY, service: 's3', region: env.R2_REGION || 'auto' });
 const BUCKET = { quarantine: env.R2_BUCKET_QUARANTINE || 'yowkly-quarantine', files: env.R2_BUCKET_FILES || 'yowkly-files' };
+// Settings mistakes must stop the run with a clear message, not make every
+// upload look broken (a URL here makes R2 answer "no such bucket" = 404).
+for (const [name, value] of [['R2_BUCKET_QUARANTINE', BUCKET.quarantine], ['R2_BUCKET_FILES', BUCKET.files]]) {
+  if (!/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(value)) throw new Error(`${name} must be just the bucket name (e.g. yowkly-quarantine), not a URL`);
+}
+if (!env.R2_ENDPOINT && !/^[a-f0-9]{32}$/.test(env.R2_ACCOUNT_ID)) {
+  throw new Error('R2_ACCOUNT_ID must be the 32-character Account ID from R2 > Account Details, not a URL');
+}
 const R2_ENDPOINT = (env.R2_ENDPOINT || `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`).replace(/\/$/, '');
 const r2url = (bucket, key) => `${R2_ENDPOINT}/${bucket}/${key}`;
+// Checked once per run, only when an object is missing: does the bucket itself exist?
+let quarantineOk = null;
+const quarantineReachable = async () =>
+  (quarantineOk ??= (await r2.fetch(`${R2_ENDPOINT}/${BUCKET.quarantine}`, { method: 'HEAD' }).catch(() => null))?.ok ?? false);
 const removeFromQuarantine = (key) => r2.fetch(r2url(BUCKET.quarantine, key), { method: 'DELETE' }).catch(() => {});
 
 /** clamd INSTREAM: <len:uint32be><bytes>... <0:uint32be>. clamd.conf must allow StreamMaxLength >= 210M. */
@@ -94,7 +106,15 @@ async function processJob(job) {
   };
   try {
     const res = await r2.fetch(r2url(BUCKET.quarantine, job.storage_path));
-    if (res.status === 404) return finish('rejected', { reason: 'The upload never finished. Upload the file again.' });
+    if (res.status === 404) {
+      // Only a missing OBJECT means the upload never finished. A missing BUCKET
+      // (or any other 404) is our configuration: retry later, never blame the file.
+      const code = (await res.text()).match(/<Code>([^<]+)<\/Code>/)?.[1];
+      if ((code && code !== 'NoSuchKey') || !(await quarantineReachable())) {
+        throw new Error(`download: bucket "${BUCKET.quarantine}" not found (${code ?? 'HTTP 404'}). Check the R2_BUCKET_QUARANTINE and R2_ACCOUNT_ID secrets.`);
+      }
+      return finish('rejected', { reason: 'The upload never finished. Upload the file again.' });
+    }
     if (!res.ok || !res.body) throw new Error(`download: HTTP ${res.status}`);
     await pipeline(Readable.fromWeb(res.body), createWriteStream(file));
 
