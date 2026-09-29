@@ -10,36 +10,44 @@ export type FormState = { error?: string; ok?: boolean } | null;
 const username = z.string().trim().regex(/^[A-Za-z0-9_]{3,30}$/, 'Usernames are 3–30 letters, numbers or underscores.');
 const displayName = z.string().trim().min(1, 'Add your name.').max(60);
 
-export async function completeOnboarding(_: FormState, form: FormData): Promise<FormState> {
-  const parsed = z.object({
-    username,
-    displayName,
-    categories: z.array(z.coerce.number().int().positive()).max(20),
-    tags: z.array(z.coerce.number().int().positive()).max(30),
-  }).safeParse({
-    username: form.get('username'),
-    displayName: form.get('displayName'),
-    categories: form.getAll('category'),
-    tags: form.getAll('tag'),
-  });
-  if (!parsed.success) return { error: parsed.error.issues[0].message };
-  if (parsed.data.categories.length + parsed.data.tags.length < 3) return { error: 'Pick at least 3 interests.' };
+const interestsSchema = z.object({
+  categories: z.array(z.coerce.number().int().positive()).max(20),
+  tags: z.array(z.coerce.number().int().positive()).max(30),
+});
 
+/** Replace the signed-in user's interests (at least 3 picks in total). RLS scopes every row to them. */
+async function saveInterests(form: FormData): Promise<FormState> {
+  const parsed = interestsSchema.safeParse({ categories: form.getAll('category'), tags: form.getAll('tag') });
+  if (!parsed.success) return { error: 'Those interests look invalid. Reload and try again.' };
+  const { categories, tags } = parsed.data;
+  if (categories.length + tags.length < 3) return { error: 'Pick at least 3 interests.' };
   const a = await authed('write');
   if ('error' in a) return { error: a.error.error };
-  const p = parsed.data;
-  const upd = await a.db.from('profiles')
-    .update({ username: p.username, display_name: p.displayName, onboarded_at: new Date().toISOString() })
-    .eq('id', a.uid);
-  if (upd.error) {
-    return { error: upd.error.code === '23505' ? 'That username is taken.' : toUserError(upd.error) };
-  }
-  await a.db.from('user_interest_categories').delete().eq('user_id', a.uid);
-  await a.db.from('user_interest_tags').delete().eq('user_id', a.uid);
-  if (p.categories.length) await a.db.from('user_interest_categories').insert(p.categories.map((category_id) => ({ category_id })));
-  if (p.tags.length) await a.db.from('user_interest_tags').insert(p.tags.map((tag_id) => ({ tag_id })));
-  revalidateTag('creators', 'max');
+  const steps = [
+    await a.db.from('user_interest_categories').delete().eq('user_id', a.uid),
+    await a.db.from('user_interest_tags').delete().eq('user_id', a.uid),
+    categories.length ? await a.db.from('user_interest_categories').insert(categories.map((category_id) => ({ category_id }))) : null,
+    tags.length ? await a.db.from('user_interest_tags').insert(tags.map((tag_id) => ({ tag_id }))) : null,
+  ];
+  const failed = steps.find((r) => r?.error);
+  if (failed?.error) return { error: toUserError(failed.error) };
+  return { ok: true };
+}
+
+/** First-run: save interests, mark onboarding done, go to the feed. Name and username are edited in Settings. */
+export async function completeOnboarding(_: FormState, form: FormData): Promise<FormState> {
+  const res = await saveInterests(form);
+  if (!res?.ok) return res;
+  const a = await authed('write');
+  if ('error' in a) return { error: a.error.error };
+  const upd = await a.db.from('profiles').update({ onboarded_at: new Date().toISOString() }).eq('id', a.uid).is('onboarded_at', null);
+  if (upd.error) return { error: toUserError(upd.error) };
   redirect('/for-you');
+}
+
+/** Settings: change interests any time. */
+export async function updateInterests(_: FormState, form: FormData): Promise<FormState> {
+  return saveInterests(form);
 }
 
 const https = z.string().trim().max(300).refine((v) => v === '' || /^https:\/\/\S+$/.test(v), 'Links must start with https://');

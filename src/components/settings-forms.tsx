@@ -2,6 +2,7 @@
 import { useActionState, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useUnsavedGuard } from '@/lib/use-unsaved-guard';
+import { keepFormOnSubmit } from '@/lib/use-kept-form';
 import { updateProfile, deleteAccount } from '@/app/actions/profile';
 import Link from 'next/link';
 import { Icon } from './icons';
@@ -51,7 +52,7 @@ export function ProfileForm({ profile: p }: { profile: Profile }) {
   };
 
   return (
-    <form ref={formRef} id="profile-form" action={action} onInput={check} onChange={check} className="flex flex-col gap-5">
+    <form ref={formRef} id="profile-form" action={action} onSubmit={keepFormOnSubmit(action)} onInput={check} onChange={check} className="flex flex-col gap-5">
       <div className="grid gap-4 sm:grid-cols-2">
         <Text label="Display name" name="displayName" initial={p.display_name} required maxLength={60} />
         <Text label="Username" name="username" initial={p.username} required pattern="[A-Za-z0-9_]{3,30}" hint="Changing it changes your profile URL." />

@@ -35,7 +35,9 @@ export default async function ForYouPage(props: PageProps<'/for-you'>) {
       rows = (data ?? []) as Card[];
     }
   }
-  const { count: interests } = await db.from('user_interest_tags').select('tag_id', { count: 'exact', head: true });
+  // Only people who never picked interests see the prompt; afterwards interests live in Settings.
+  const { data: me } = await db.from('profiles').select('onboarded_at').eq('id', uid).single();
+  const needsInterests = !me?.onboarded_at;
 
   return (
     <div className="mx-auto max-w-[1440px] px-4 pt-10 md:px-10">
@@ -49,7 +51,7 @@ export default async function ForYouPage(props: PageProps<'/for-you'>) {
         ))}
       </nav>
 
-      {tab === 'for-you' && !interests && (
+      {tab === 'for-you' && needsInterests && (
         <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-surface-1 p-5 shadow-[inset_0_0_0_1px_var(--line)]">
           <p className="m-0 text-ink-2">Pick a few interests and this feed gets a lot smarter.</p>
           <Link href="/onboarding" className="btn btn-primary">Choose interests</Link>
