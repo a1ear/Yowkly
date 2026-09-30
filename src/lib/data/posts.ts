@@ -6,6 +6,7 @@ export type Post = {
   id: string; body: string; tags: string[]; like_count: number; created_at: string;
   author_id: string; author_username: string; author_display_name: string; author_avatar_path: string | null;
   comment_count: number; dislike_count: number; edited_at: string | null;
+  images: { path: string; alt: string | null; width: number | null; height: number | null }[];
   /** The best one or two comments, shown under the post without opening the thread. */
   previews: PostComment[];
 };

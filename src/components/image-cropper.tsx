@@ -29,6 +29,7 @@ export function ImageCropper({ file, shapes, round, title = 'Crop image', onDone
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const drag = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
 
   // Released when the cropper finishes or is cancelled (not in an effect cleanup, which
   // React runs between its two development mounts and would break the preview).
@@ -75,9 +76,9 @@ export function ImageCropper({ file, shapes, round, title = 'Crop image', onDone
     setBusy(true);
     try {
       const sx = -view.x / scale, sy = -view.y / scale, sw = frameW / scale, sh = frameH / scale;
-      const img = new Image();
-      img.src = src;
-      await img.decode();
+      // Draw from the image already on screen (it has loaded, so there's nothing to wait for).
+      const img = imgRef.current;
+      if (!img) throw new Error('no image');
       const canvas = document.createElement('canvas');
       canvas.width = Math.max(1, Math.round(sw));
       canvas.height = Math.max(1, Math.round(sh));
@@ -124,7 +125,7 @@ export function ImageCropper({ file, shapes, round, title = 'Crop image', onDone
             }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={src} alt="" draggable={false} onLoad={(e) => setNatural({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+            <img ref={imgRef} src={src} alt="" draggable={false} onLoad={(e) => setNatural({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
                  className="pointer-events-none absolute top-0 left-0 max-w-none"
                  style={{ width: imgW || undefined, height: imgH || undefined, transform: `translate(${view.x}px, ${view.y}px)` }} />
             <div aria-hidden="true" className={`pointer-events-none absolute inset-0 shadow-[inset_0_0_0_2px_rgba(255,255,255,.85)] ${round ? 'rounded-full' : 'rounded-md'}`} />

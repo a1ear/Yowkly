@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { loadNotifications, markAllNotificationsRead, type NotificationItem } from '@/app/actions/notifications';
 import { Icon, type IconName } from './icons';
+import { Avatar } from './bits';
 import { timeAgo } from '@/lib/format';
 
 function describe(n: NotificationItem, close: () => void): [IconName, React.ReactNode, string | null] {
@@ -88,7 +89,18 @@ export function NotificationsBell({ unread, onRead }: { unread: number; onRead: 
                   const [icon, text, href] = describe(n, close);
                   return (
                     <li key={n.id} className={`relative flex items-start gap-3 rounded-lg px-3 py-3 ${n.read_at ? '' : 'bg-surface-2'}`}>
-                      <span className="mt-0.5 text-ink-3"><Icon name={icon} size={17} /></span>
+                      {/* The person behind it (their real profile picture) with a small badge for what happened;
+                          system notices (approvals, scans, rankings) keep a plain icon. */}
+                      {n.actor ? (
+                        <span className="relative mt-0.5 shrink-0">
+                          <Avatar name={n.actor.display_name} path={n.actor.avatar_path} seed={n.actor.username} size={40} />
+                          <span className="absolute -right-1 -bottom-1 inline-flex h-[20px] w-[20px] items-center justify-center rounded-full bg-accent text-on-accent shadow-[0_0_0_2px_var(--surface-1)]">
+                            <Icon name={icon} size={11} strokeWidth={2.4} />
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-surface-3 text-ink-2"><Icon name={icon} size={18} /></span>
+                      )}
                       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                         <span className="text-[14px] text-ink-2">{text}</span>
                         <span className="text-[12px] text-ink-3">{timeAgo(n.created_at)}</span>

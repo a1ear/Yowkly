@@ -701,6 +701,41 @@ test('friends, activity status, suspensions and admin tools', async () => {
   assert.deepEqual(log.map((l) => l.action), ['grant_moderator', 'trust_creator', 'suspend_user', 'unsuspend_user']);
 });
 
+test('post images: server-picked paths, own images only, up to 4, image-only posts allowed', async () => {
+  const poster = await createUser(db, { email: 'pics@test.dev' });
+  const thief = await createUser(db, { email: 'pics-thief@test.dev' });
+  const prep = (uid, type = 'image/webp', size = 200000) =>
+    as(db, uid, `select public.prepare_post_image($1, $2) as path`, [type, size]);
+
+  fails(await prep(poster, 'image/svg+xml'), /PNG, JPG/, 'SVG can carry script');
+  fails(await prep(poster, 'text/html'), /PNG, JPG/);
+  fails(await prep(poster, 'image/png', 6 * 1024 * 1024), /5 MB/);
+  fails(await prep(u.unverified), /Verify your email/);
+  const paths = [];
+  for (let i = 0; i < 5; i++) paths.push(ok(await prep(poster))[0].path);
+  assert.match(paths[0], new RegExp(`^${poster}/posts/[0-9a-f-]{36}\\.webp$`));
+  fails(await as(db, poster, `insert into public.post_images (owner_id, path) values ($1, 'x/posts/y.png')`, [poster]), /permission denied/, 'direct insert');
+
+  const create = (uid, body, imgs) => as(db, uid, `select public.create_post($1, '{}', $2::jsonb) as id`, [body, JSON.stringify(imgs)]);
+  fails(await create(poster, 'too many', paths.slice(0, 5).map((path) => ({ path }))), /up to 4 images/);
+  fails(await create(thief, 'stolen', [{ path: paths[0] }]), /isn't yours/, 'someone else\'s image');
+  fails(await create(poster, 'made up', [{ path: `${poster}/posts/00000000-0000-0000-0000-000000000000.webp` }]), /isn't yours/, 'a path that was never issued');
+  fails(await create(poster, '   ', []), /Write something or add an image/);
+
+  const [{ id }] = ok(await create(poster, '', [{ path: paths[0], alt: 'A dashboard', width: 1600, height: 1000 }, { path: paths[1], width: 'x' }]));
+  const [card] = ok(await as(db, null, `select body, images from public.post_cards where id = $1`, [id]));
+  assert.equal(card.body, '', 'image-only post');
+  assert.deepEqual(card.images.map((i) => [i.path, i.alt, i.width]), [[paths[0], 'A dashboard', 1600], [paths[1], null, null]]);
+  fails(await create(poster, 'reuse', [{ path: paths[0] }]), /isn't yours|already used/, 'image used twice');
+
+  // Pending images are private to their owner; attached ones follow the post.
+  none(await as(db, thief, `select 1 from public.post_images where path = $1`, [paths[2]]), 'someone else\'s pending image');
+  assert.equal(ok(await as(db, null, `select 1 from public.post_images where post_id = $1`, [id])).length, 2);
+  ok(await as(db, poster, `select public.delete_post($1)`, [id]));
+  none(await as(db, null, `select 1 from public.post_images where post_id = $1`, [id]), 'images of a removed post');
+  fails(await as(db, poster, `select public.update_post($1, '', '{}')`, [id]), /not found/i);
+});
+
 test('reports are private to the reporter and moderators', async () => {
   ok(await as(db, u.bob, `insert into public.reports (target_type, target_id, reason) values ('template', $1, 'broken')`, [s.tpl]));
   none(await as(db, u.alice, `select id from public.reports`));

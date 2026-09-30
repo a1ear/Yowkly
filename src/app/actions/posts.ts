@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { authed, fail, toUserError, type ActionResult } from '@/lib/actions';
 import { userClient } from '@/lib/supabase/clients';
 import { POSTS_TAG, type PostComment } from '@/lib/data/posts';
+import { presignUpload } from '@/lib/r2';
 import type { FormState } from './profile';
 
 const uuid = z.uuid();
@@ -16,15 +17,37 @@ export async function createPost(_: FormState, form: FormData): Promise<FormStat
   const body = z.string().max(5000).safeParse(form.get('body') ?? '');
   const tags = z.string().max(500).safeParse(form.get('tags') ?? '');
   if (!body.success || !tags.success) return { error: 'That post is too long.' };
+  // Paths are checked against the caller's own pending uploads in create_post.
+  const images = z.array(z.object({
+    path: z.string().max(200), alt: z.string().max(250).optional(),
+    width: z.number().int().optional(), height: z.number().int().optional(),
+  })).max(4).safeParse((() => { try { return JSON.parse(String(form.get('images') ?? '[]')); } catch { return null; } })());
+  if (!images.success) return { error: 'A post can have up to 4 images.' };
   const a = await authed('post');
   if ('error' in a) return { error: a.error.error };
   const { error } = await a.db.rpc('create_post', {
     p_body: body.data,
     p_tags: tags.data.split(/[\s,]+/).filter(Boolean),
+    p_images: images.data,
   });
   if (error) return { error: toUserError(error) };
   updateTag(POSTS_TAG); // the author sees it straight away
   return { ok: true };
+}
+
+/** Reserve a path for a post image (prepare_post_image checks type, 5 MB and a daily cap) and sign the upload. */
+export async function startPostImageUpload(contentType: string, size: number): Promise<ActionResult<{ path: string; url: string }>> {
+  if (typeof contentType !== 'string' || !Number.isInteger(size)) return fail('Invalid image.');
+  const a = await authed('upload');
+  if ('error' in a) return a.error;
+  const { data: path, error } = await a.db.rpc('prepare_post_image', { p_content_type: contentType, p_size: size });
+  if (error) return fail(toUserError(error));
+  try {
+    return { ok: true, data: { path: path as string, url: await presignUpload('media', path as string, { contentType, size }) } };
+  } catch (e) {
+    console.error('[posts] presign failed', (e as Error).message);
+    return fail('Image uploads are temporarily unavailable. Try again shortly.');
+  }
 }
 
 /** Authors edit their own posts; update_post re-checks ownership and the same rules as a new post. */

@@ -4,7 +4,7 @@ import { userClient } from '@/lib/supabase/clients';
 
 export type NotificationItem = {
   id: number; type: string; data: Record<string, unknown>; read_at: string | null; created_at: string;
-  actor: { username: string; display_name: string } | null;
+  actor: { username: string; display_name: string; avatar_path: string | null } | null;
   template: { slug: string; title: string } | null;
 };
 
@@ -14,7 +14,7 @@ export async function loadNotifications(): Promise<NotificationItem[] | null> {
   const { data: claims } = await db.auth.getClaims();
   if (!claims?.claims?.sub) return null;
   const { data } = await db.from('notifications')
-    .select('id, type, data, read_at, created_at, actor:profiles!notifications_actor_id_fkey(username, display_name), template:templates(slug, title)')
+    .select('id, type, data, read_at, created_at, actor:profiles!notifications_actor_id_fkey(username, display_name, avatar_path), template:templates(slug, title)')
     .order('created_at', { ascending: false }).limit(50);
   return (data ?? []) as unknown as NotificationItem[];
 }

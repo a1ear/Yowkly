@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, useTransition } from 'react';
 import { addPostComment, commentReactionStates, createPost, deletePost, updatePost, loadPostComments, postReactionStates, removePostComment, setCommentReaction, setPostReaction } from '@/app/actions/posts';
 import { Avatar } from './bits';
 import { Dialog } from './dialog';
+import { PostImageGrid, PostImagePicker, type PostImageDraft } from './post-images';
 import { Icon } from './icons';
 import { ReportDialog } from './template/panels';
 import { useMe } from './header-account';
@@ -32,6 +33,8 @@ export function PostComposer({ onlyFor }: { onlyFor?: string }) {
   const [pending, start] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const [images, setImages] = useState<PostImageDraft[]>([]);
+  const uploading = images.some((i) => i.state === 'uploading');
 
   if (me === undefined) return onlyFor ? null : <span className="skeleton block h-[76px] w-full rounded-2xl" />;
   if (onlyFor && me?.id !== onlyFor) return null;
@@ -46,10 +49,15 @@ export function PostComposer({ onlyFor }: { onlyFor?: string }) {
   const submit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
+    const ready = images.filter((i) => i.state === 'ready' && i.path);
+    if (!String(data.get('body') ?? '').trim() && !ready.length) return setError('Write something or add an image first.');
+    data.set('images', JSON.stringify(ready.map((i) => ({ path: i.path, alt: i.alt.trim() || undefined, width: i.width, height: i.height }))));
     start(async () => {
       const r = await createPost(null, data);
       if (r?.error) return setError(r.error);
       formRef.current?.reset();
+      for (const i of images) URL.revokeObjectURL(i.preview);
+      setImages([]);
       setLength(0);
       setError(null);
       setOpen(false);
@@ -78,17 +86,18 @@ export function PostComposer({ onlyFor }: { onlyFor?: string }) {
           </div>
           <label className="flex flex-col gap-1">
             <span className="sr-only">Your post</span>
-            <textarea ref={bodyRef} name="body" rows={5} maxLength={MAX} required onChange={(e) => setLength(e.target.value.length)}
+            <textarea ref={bodyRef} name="body" rows={5} maxLength={MAX} onChange={(e) => setLength(e.target.value.length)}
                       placeholder="Share what you're building, a lesson, a question…" className="field h-auto resize-y py-2.5" />
           </label>
           <label className="flex flex-col gap-1">
             <span className="sr-only">Tags</span>
             <input name="tags" maxLength={200} autoComplete="off" placeholder="Tags: react, design (up to 5, separated by spaces or commas)" className="field" />
           </label>
+          <PostImagePicker images={images} setImages={setImages} />
           {error && <p role="alert" className="m-0 flex items-center gap-2 text-danger"><Icon name="alert" size={16} />{error}</p>}
           <div className="flex items-center justify-between gap-3">
             <span className={`font-mono text-xs ${length > MAX - 100 ? 'text-danger' : 'text-ink-3'}`}>{length}/{MAX}</span>
-            <button className="btn btn-primary" disabled={pending}>{pending ? 'Posting…' : 'Post'}</button>
+            <button className="btn btn-primary" disabled={pending || uploading}>{pending ? 'Posting…' : uploading ? 'Uploading…' : 'Post'}</button>
           </div>
         </form>
       </Dialog>
@@ -252,7 +261,8 @@ function PostItem({ post, me, reaction, counts, onReact, onDeleted }: {
       {editing && <EditPost post={post} content={content} onClose={() => setEditing(false)} onSaved={(c) => { setContent({ ...c, edited: true }); setEditing(false); }} />}
 
       {/* Plain text only: React escapes it, and no links are made clickable. */}
-      <p className="m-0 text-[15.5px] leading-relaxed break-words whitespace-pre-line">{content.body}</p>
+      {content.body && <p className="m-0 text-[15.5px] leading-relaxed break-words whitespace-pre-line">{content.body}</p>}
+      <PostImageGrid images={post.images ?? []} author={post.author_display_name} />
 
       {content.tags.length > 0 && (
         <ul className="m-0 flex list-none flex-wrap gap-x-3 gap-y-1 p-0 text-[13px]" aria-label="Tags">
