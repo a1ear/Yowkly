@@ -7,11 +7,16 @@ import { YOWKBITS_EVENT } from '@/lib/events';
 import { Icon } from './icons';
 import { Avatar } from './bits';
 import { NotificationsBell } from './notifications-popover';
+import { MODE_OPTIONS, PresenceHeartbeat, StatusDot } from './presence';
+import { setMyStatus } from '@/app/actions/friends';
+import type { StatusMode } from '@/app/actions/friends';
 
 type Me = {
   id: string; username: string; display_name: string; avatar_path: string | null; unread: number; balance: number;
   /** Staff role for the admin panel link: 'admin', 'moderator', 'reviewer' (sub-admin) or null. */
   role: 'admin' | 'moderator' | 'reviewer' | null;
+  /** What the person chose: online, idle or invisible (appear offline). */
+  status_mode: StatusMode;
 };
 
 /**
@@ -46,6 +51,7 @@ export function HeaderAccount() {
   const [open, setOpen] = useState(false);
   // Cleared locally for this copy of `me`; the next /api/me load brings the real count back.
   const [clearedFor, setClearedFor] = useState<Me | null>(null);
+  const [modeOverride, setModeOverride] = useState<StatusMode | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
@@ -60,6 +66,8 @@ export function HeaderAccount() {
       document.removeEventListener('keydown', onKey);
     };
   }, [open]);
+
+  const mode: StatusMode = modeOverride ?? me?.status_mode ?? 'online';
 
   async function signOut() {
     setOpen(false);
@@ -81,6 +89,7 @@ export function HeaderAccount() {
       )}
       {me && (
         <>
+          <PresenceHeartbeat />
           <Link
             href="/ranking#yowkbits"
             title="Yowkbits: spend 1 to vote for a template"
@@ -104,13 +113,25 @@ export function HeaderAccount() {
               aria-haspopup="menu"
               aria-expanded={open}
               onClick={() => setOpen((v) => !v)}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-full"
+              className="relative inline-flex h-11 w-11 items-center justify-center rounded-full"
             >
               <Avatar name={me.display_name} path={me.avatar_path} seed={me.username} size={34} />
+              <StatusDot status={mode === 'invisible' ? 'offline' : mode} size={11} ring="var(--canvas)" className="absolute right-0.5 bottom-0.5" />
             </button>
             {open && (
               <div role="menu" className="absolute top-12 right-0 w-56 rounded-xl bg-surface-1 p-1.5 shadow-e2 ring-1 ring-line">
                 <p className="m-0 truncate px-3 pt-2 pb-1 text-[13px] text-ink-3">@{me.username}</p>
+                <div role="group" aria-label="Your status" className="mb-1 border-b border-line pb-1.5">
+                  {MODE_OPTIONS.map(([value, label, hint]) => (
+                    <button key={value} role="menuitemradio" aria-checked={mode === value} type="button" title={hint}
+                            onClick={async () => { setModeOverride(value); const r = await setMyStatus(value); if (!r.ok) setModeOverride(null); }}
+                            className="flex h-9 w-full items-center gap-2.5 rounded-md px-3 text-left text-sm text-ink hover:bg-surface-2">
+                      <StatusDot status={value === 'invisible' ? 'offline' : value} size={10} ring="transparent" />
+                      <span className="flex-1">{label}</span>
+                      {mode === value && <Icon name="check" size={14} className="text-accent-ink" />}
+                    </button>
+                  ))}
+                </div>
                 {[
                   [`/@${me.username}`, 'Your profile', 'user'],
                   ['/dashboard', 'Creator dashboard', 'grid'],

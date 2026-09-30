@@ -524,7 +524,7 @@ test('comment reactions and previews: one reaction each, private, counted; previ
   fails(await as(db, u.bob, `insert into public.post_comment_likes (comment_id) values ($1)`, [c2]), /row-level security/, 'react to a removed comment');
 });
 
-test('sub-admins: granted by an admin to a follower, may only approve or request changes; staff are notified', async () => {
+test('sub-admins: granted by an admin to a friend, may only approve or request changes; staff are notified', async () => {
   const boss = await createUser(db, { email: 'boss@test.dev' });
   const fan = await createUser(db, { email: 'fan@test.dev' });
   const stranger = await createUser(db, { email: 'stranger@test.dev' });
@@ -535,7 +535,9 @@ test('sub-admins: granted by an admin to a follower, may only approve or request
   // Only admins grant it, only to their followers, and nobody grants it to themselves.
   fails(await as(db, u.mod, `select public.set_sub_admin($1, true)`, [fan]), /Admins only/);
   fails(await as(db, fan, `select public.set_sub_admin($1, true)`, [fan]), /Admins only/);
-  fails(await as(db, boss, `select public.set_sub_admin($1, true)`, [stranger]), /follow you/);
+  fails(await as(db, boss, `select public.set_sub_admin($1, true)`, [stranger]), /Only friends/);
+  fails(await as(db, boss, `select public.set_sub_admin($1, true)`, [fan]), /Only friends/, 'a follower the admin does not follow back');
+  ok(await as(db, boss, `insert into public.follows (followee_id) values ($1)`, [fan]));
   ok(await as(db, boss, `select public.set_sub_admin($1, true)`, [fan]));
   assert.equal(ok(await as(db, fan, `select public.my_staff_role() as r`))[0].r, 'reviewer');
   assert.equal(ok(await as(db, stranger, `select public.my_staff_role() as r`))[0].r, null);
@@ -633,6 +635,70 @@ test('post edits: author only, same rules as a new post, marked as edited', asyn
   assert.ok(card.edited_at, 'marked as edited');
   ok(await as(db, author, `select public.delete_post($1)`, [id]));
   fails(await upd(author, 'after delete'), /Post not found/, 'edit a deleted post');
+});
+
+test('friends, activity status, suspensions and admin tools', async () => {
+  const ann = await createUser(db, { email: 'ann@test.dev' });
+  const ben = await createUser(db, { email: 'ben@test.dev' });
+  const cal = await createUser(db, { email: 'cal@test.dev' });
+  const chief = await createUser(db, { email: 'chief@test.dev' });
+  await sql(`insert into public.user_roles (user_id, role) values ($1, 'admin')`, [chief]);
+  const follow = (a, b) => as(db, a, `insert into public.follows (followee_id) values ($1)`, [b]);
+  ok(await follow(ann, ben)); ok(await follow(ben, ann)); // friends
+  ok(await follow(cal, ann));                             // one-way: not a friend
+
+  // Friends lists: private by default, visible to the owner, public when they choose.
+  const friendsOf = (viewer, of) => as(db, viewer, `select id from public.friends_of($1)`, [of]).then((r) => ok(r).map((x) => x.id));
+  assert.deepEqual(await friendsOf(ann, ann), [ben], 'mutual follows only');
+  assert.deepEqual(await friendsOf(cal, ann), [], 'private list');
+  assert.deepEqual(await friendsOf(null, ann), [], 'private list, signed out');
+  ok(await as(db, ann, `update public.profiles set friends_public = true where id = $1`, [ann]));
+  assert.deepEqual(await friendsOf(null, ann), [ben], 'public list');
+  none(await as(db, cal, `update public.profiles set friends_public = true where id = $1 returning id`, [ann]), 'toggle someone else\'s list');
+
+  // Status: only friends see it, timestamps never leak, "appear offline" hides you.
+  const statusOf = (viewer, of) => as(db, viewer, `select public.user_status($1) as s`, [of]).then((r) => ok(r)[0].s);
+  assert.equal(await statusOf(ben, ann), 'offline', 'never seen');
+  ok(await as(db, ann, `select public.touch_presence(true)`));
+  assert.equal(await statusOf(ben, ann), 'online');
+  assert.equal(await statusOf(cal, ann), null, 'non-friend sees no status');
+  assert.equal(await statusOf(null, ann), null, 'signed out sees no status');
+  fails(await as(db, cal, `select * from public.user_presence`).then((r) => (r.rows?.length ? { error: { message: 'leak' } } : { error: { message: 'none' } })), /none/, 'presence rows of others');
+  fails(await as(db, ben, `select public.presence_status($1)`, [ann]), /permission denied/, 'internal status function');
+  ok(await as(db, ann, `select public.set_my_status('idle')`));
+  assert.equal(await statusOf(ben, ann), 'idle');
+  ok(await as(db, ann, `select public.set_my_status('invisible')`));
+  assert.equal(await statusOf(ben, ann), 'offline', 'appear offline');
+  fails(await as(db, ann, `select public.set_my_status('dnd-hacked')`), /Choose Online/);
+  const friends = ok(await as(db, ben, `select id, status from public.my_friends()`));
+  assert.deepEqual(friends.map((f) => [f.id, f.status]), [[ann, 'offline']]);
+  await sql(`update public.user_presence set last_seen_at = now() - interval '10 minutes', status_mode = 'online' where user_id = $1`, [ann]);
+  assert.equal(await statusOf(ben, ann), 'offline', 'gone quiet');
+
+  // Admin tools: admins only.
+  fails(await as(db, u.mod, `select public.admin_users(null, 10)`).then((r) => (r.error ? r : (r.rows.length ? { error: { message: 'leak' } } : { error: { message: 'none' } }))), /none/, 'moderator lists users');
+  const users = ok(await as(db, chief, `select id, email from public.admin_users('ann@', 10)`));
+  assert.deepEqual(users.map((x) => x.email), ['ann@test.dev']);
+  ok(await as(db, u.mod, `select public.admin_overview() as o`));
+  fails(await as(db, ann, `select public.admin_overview()`), /Moderators only/);
+  fails(await as(db, u.mod, `select public.admin_set_moderator($1, true)`, [cal]), /Admins only/);
+  ok(await as(db, chief, `select public.admin_set_moderator($1, true)`, [cal]));
+  ok(await as(db, chief, `select public.admin_set_trust($1, true)`, [cal]));
+  assert.equal((await sql(`select trust_level from public.profiles where id = $1`, [cal]))[0].trust_level, 1);
+
+  // Suspension: reason required, never an admin, removes staff roles, blocks RPCs and direct writes.
+  fails(await as(db, chief, `select public.admin_suspend($1, true, '')`, [cal]), /reason/);
+  fails(await as(db, chief, `select public.admin_suspend($1, true, 'nope')`, [chief]), /yourself/);
+  fails(await as(db, u.mod, `select public.admin_suspend($1, true, 'spam')`, [cal]), /Admins only/);
+  ok(await as(db, chief, `select public.admin_suspend($1, true, 'Spam uploads')`, [cal]));
+  assert.equal(ok(await as(db, cal, `select public.my_staff_role() as r`))[0].r, null, 'roles removed');
+  fails(await as(db, cal, `select public.create_post('still here?', '{}')`), /suspended/);
+  fails(await as(db, cal, `insert into public.follows (followee_id) values ($1)`, [ben]), /row-level security/, 'direct write while suspended');
+  fails(await as(db, cal, `update public.profiles set bio = 'x' where id = $1`, [cal]).then((r) => (r.error ? r : (r.affected ? { error: { message: 'edited' } } : { error: { message: 'blocked' } }))), /blocked/, 'profile edit while suspended');
+  ok(await as(db, chief, `select public.admin_suspend($1, false)`, [cal]));
+  ok(await as(db, cal, `insert into public.follows (followee_id) values ($1)`, [ben]));
+  const log = await sql(`select action from public.moderation_log where target_id = $1 order by id`, [cal]);
+  assert.deepEqual(log.map((l) => l.action), ['grant_moderator', 'trust_creator', 'suspend_user', 'unsuspend_user']);
 });
 
 test('reports are private to the reporter and moderators', async () => {

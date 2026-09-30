@@ -102,7 +102,7 @@ export default async function TemplatePage(props: PageProps<'/t/[slug]'>) {
 
             <DetailTabs tabs={[
               { id: 'overview', label: 'Overview', panel: d.description ? <SafeMarkdown text={d.description} /> : <p className="m-0 text-ink-2">No description yet.</p> },
-              ...(inspo ? [] : [              {
+              ...(inspo || currentFiles.length === 0 ? [] : [              {
                 id: 'files', label: 'Files', count: currentFiles.length,
                 panel: currentFiles.length === 0 ? <p className="m-0 text-ink-2">This template is shared as a link. Use the buttons in the download panel.</p> : (
                   <div className="flex flex-col gap-4">

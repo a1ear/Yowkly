@@ -266,11 +266,16 @@ export function DownloadPanel({ versions, files, currentVersionId, licenses, lin
     window.location.assign(body.url);
   }
 
+  // No files in any version: no "Download" wording at all. With links only, it's a "Get it" panel;
+  // with nothing (a demo-only template) the panel shows just the license, if any.
+  const hasFiles = files.length > 0;
+  if (!hasFiles && links.length === 0 && !license) return null;
+
   return (
     <section id="download" aria-labelledby="download-title" className="flex scroll-mt-24 flex-col gap-4 rounded-xl bg-surface-1 p-5 shadow-[inset_0_0_0_1px_var(--line)]">
       <div className="flex items-center justify-between gap-3">
-        <h2 id="download-title" className="m-0 text-base font-semibold">Download</h2>
-        {versions.length > 0 && (
+        <h2 id="download-title" className="m-0 text-base font-semibold">{hasFiles ? 'Download' : 'Get it'}</h2>
+        {hasFiles && versions.length > 1 && (
           <label className="flex items-center gap-2">
             <span className="sr-only">Version</span>
             <select value={versionId} onChange={(e) => { setVersionId(e.target.value); setDl({ phase: 'idle' }); }}

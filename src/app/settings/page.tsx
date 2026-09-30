@@ -3,6 +3,8 @@ import { redirect } from 'next/navigation';
 import { userClient } from '@/lib/supabase/clients';
 import { ProfileForm, DangerZone } from '@/components/settings-forms';
 import { SettingsInterests } from '@/components/interest-picker';
+import { SocialSettings } from '@/components/social-settings';
+import type { StatusMode } from '@/app/actions/friends';
 import { getCategories, getTagsByType } from '@/lib/data/public';
 
 export const metadata: Metadata = { title: 'Settings', robots: { index: false } };
@@ -12,13 +14,14 @@ export default async function SettingsPage() {
   const { data: claims } = await db.auth.getClaims();
   const uid = claims?.claims?.sub;
   if (!uid) redirect('/auth/sign-in?next=/settings');
-  const [categories, tags, { data: ic }, { data: it }] = await Promise.all([
+  const [categories, tags, { data: ic }, { data: it }, { data: pres }] = await Promise.all([
     getCategories(), getTagsByType(),
     db.from('user_interest_categories').select('category_id'),
     db.from('user_interest_tags').select('tag_id'),
+    db.rpc('my_presence'),
   ]);
   const { data: p } = await db.from('profiles')
-    .select('username, display_name, bio, location, website, github, x_handle, linkedin, dribbble, behance, instagram, youtube, skills, available_for_hire, hide_likes')
+    .select('username, display_name, bio, location, website, github, x_handle, linkedin, dribbble, behance, instagram, youtube, skills, available_for_hire, hide_likes, friends_public')
     .eq('id', uid).single();
   return (
     <div className="mx-auto max-w-3xl px-4 pt-10">
@@ -26,6 +29,11 @@ export default async function SettingsPage() {
       <section aria-labelledby="profile-h" className="mt-10">
         <h2 id="profile-h" className="m-0 mb-5 text-lg font-semibold">Profile</h2>
         <ProfileForm profile={p as Parameters<typeof ProfileForm>[0]['profile']} />
+      </section>
+      <section id="friends" aria-labelledby="friends-h" className="mt-14 scroll-mt-28">
+        <h2 id="friends-h" className="m-0 mb-5 text-lg font-semibold">Status &amp; friends</h2>
+        <SocialSettings initialMode={((pres as { status_mode: StatusMode }[] | null)?.[0]?.status_mode) ?? 'online'}
+                        initialPublic={Boolean((p as { friends_public?: boolean } | null)?.friends_public)} />
       </section>
       <section id="interests" aria-labelledby="interests-h" className="mt-14 scroll-mt-28">
         <h2 id="interests-h" className="m-0 mb-1 text-lg font-semibold">Interests</h2>

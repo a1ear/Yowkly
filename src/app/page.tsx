@@ -76,8 +76,8 @@ function Showcase({ home, tod }: { home: Home; tod: NonNullable<Home['templateOf
             </div>
             <div className="mt-1.5 flex gap-2.5">
               <Link href={`/t/${tod.slug}`} className="btn btn-primary btn-lg"><Icon name="eye" size={18} />View template</Link>
-              <Link href={`/t/${tod.slug}#download`} className="btn btn-secondary btn-lg border-[#2E2B25] bg-[rgba(15,14,12,.5)] text-[#F2EFE8]">
-                <Icon name="download" size={18} />Download
+              <Link href="/ranking" className="btn btn-secondary btn-lg border-[#2E2B25] bg-[rgba(15,14,12,.5)] text-[#F2EFE8]">
+                <Icon name="trophy" size={18} />See the Ranking
               </Link>
             </div>
           </div>

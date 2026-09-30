@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { communityParams, getPosts, POST_PAGE_SIZE } from '@/lib/data/posts';
 import { PostComposer, PostList } from '@/components/posts';
+import { FriendsSidebar } from '@/components/friends';
 import { Icon } from '@/components/icons';
 import { formatCount } from '@/lib/format';
 
@@ -22,8 +23,19 @@ export default async function CommunityPage(props: PageProps<'/community'>) {
   };
 
   return (
-    <div className="mx-auto max-w-[760px] px-4 pt-6 pb-16 md:px-6">
+    <div className="mx-auto grid max-w-[1400px] gap-6 px-4 pt-6 pb-16 md:px-6 xl:grid-cols-[280px_minmax(0,760px)_280px] xl:justify-center">
+      <aside aria-label="Friends" className="hidden xl:block">
+        <div className="sticky top-[96px]"><FriendsSidebar /></div>
+      </aside>
+      <div className="mx-auto w-full max-w-[760px] min-w-0">
       <h1 className="sr-only">Community</h1>
+
+      <details className="group mb-4 xl:hidden">
+        <summary className="flex h-11 cursor-pointer list-none items-center justify-between rounded-xl bg-surface-1 px-4 text-sm font-semibold shadow-[inset_0_0_0_1px_var(--line)]">
+          Friends<Icon name="chevronDown" size={16} className="transition group-open:rotate-180" />
+        </summary>
+        <div className="mt-2"><FriendsSidebar /></div>
+      </details>
 
       <div><PostComposer /></div>
 
@@ -45,6 +57,7 @@ export default async function CommunityPage(props: PageProps<'/community'>) {
           {page < pages ? <Link href={href(page + 1)} className="btn btn-secondary">Older<Icon name="chevronRight" size={16} /></Link> : <span />}
         </nav>
       )}
+      </div>
     </div>
   );
 }

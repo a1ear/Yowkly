@@ -4,6 +4,8 @@ import { notFound } from 'next/navigation';
 import { getCreator, getCreatorTemplates, getAwards } from '@/lib/data/public';
 import { getPosts } from '@/lib/data/posts';
 import { PostComposer, PostList } from '@/components/posts';
+import { FriendsTab, FriendsTabLink } from '@/components/friends';
+import { UserStatusDot } from '@/components/presence';
 import { publicClient } from '@/lib/supabase/clients';
 import { Avatar, EmptyState, AwardRibbon } from '@/components/bits';
 import { TemplateCard } from '@/components/template-card';
@@ -53,7 +55,9 @@ function Cover({ c }: { c: Creator }) {
 export default async function ProfilePage(props: PageProps<'/u/[username]'>) {
   const { username } = await props.params;
   const sp = await props.searchParams;
-  const tab = (TABS as readonly string[]).includes(String(sp.tab)) ? (String(sp.tab) as (typeof TABS)[number]) : 'templates';
+  // 'friends' is its own tab, shown only to the owner or when the list is public (see FriendsTabLink).
+  const friendsTab = sp.tab === 'friends';
+  const tab: (typeof TABS)[number] | 'friends' = friendsTab ? 'friends' : (TABS as readonly string[]).includes(String(sp.tab)) ? (String(sp.tab) as (typeof TABS)[number]) : 'templates';
   const c = await getCreator(username);
   if (!c) notFound();
   const [templates, collections, awards, posts] = await Promise.all([
@@ -85,6 +89,7 @@ export default async function ProfilePage(props: PageProps<'/u/[username]'>) {
               <span className="hidden md:block"><Avatar name={c.display_name} path={c.avatar_path} seed={c.username} size={168} /></span>
               <span className="md:hidden"><Avatar name={c.display_name} path={c.avatar_path} seed={c.username} size={112} /></span>
               <ProfileImageEditor userId={c.id} kind="avatar" hasImage={Boolean(c.avatar_path)} />
+              <UserStatusDot userId={c.id} size={22} className="absolute top-2 right-2 md:top-3 md:right-3" />
             </div>
             <div className="rise flex flex-col gap-1.5 md:pb-2">
               <h1 className="m-0 font-display text-[40px] leading-none font-normal md:text-[52px]">{c.display_name}</h1>
@@ -127,6 +132,7 @@ export default async function ProfilePage(props: PageProps<'/u/[username]'>) {
               {t}<span className="font-mono text-[11.5px] text-ink-3">{counts[t]}</span>
             </Link>
           ))}
+          <FriendsTabLink userId={c.id} href={`/@${c.username}?tab=friends`} active={friendsTab} />
         </nav>
       </section>
 
@@ -177,6 +183,8 @@ export default async function ProfilePage(props: PageProps<'/u/[username]'>) {
         </aside>
 
         <div className="min-w-0">
+          {friendsTab && <FriendsTab userId={c.id} name={c.display_name} />}
+
           {tab === 'posts' && (
             <div className="flex flex-col gap-4">
               <PostComposer onlyFor={c.id} />

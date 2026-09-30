@@ -16,6 +16,7 @@ export const LIMITS = {
   download: { tokens: 30, window: '1 h' },
   upload: { tokens: 30, window: '1 h' },
   auth: { tokens: 10, window: '10 m' },
+  presence: { tokens: 30, window: '10 m' },
   write: { tokens: 120, window: '10 m' },
 } as const satisfies Record<string, { tokens: number; window: `${number} ${'s' | 'm' | 'h' | 'd'}` }>;
 export type LimitName = keyof typeof LIMITS;
