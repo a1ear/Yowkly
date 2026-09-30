@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { signOut as serverSignOut } from '@/app/actions/auth';
-import { YOWKBITS_EVENT } from '@/lib/events';
+import { MESSAGES_EVENT, YOWKBITS_EVENT } from '@/lib/events';
 import { Icon } from './icons';
 import { Avatar } from './bits';
 import { NotificationsBell } from './notifications-popover';
@@ -17,6 +17,7 @@ type Me = {
   role: 'admin' | 'moderator' | 'reviewer' | null;
   /** What the person chose: online, idle or invisible (appear offline). */
   status_mode: StatusMode;
+  unread_messages: number;
 };
 
 /**
@@ -38,9 +39,12 @@ export function useMe() {
     // A vote on a template page reports the new balance straight away.
     const onSpend = (e: Event) => setMe((m) => (m ? { ...m, balance: Number((e as CustomEvent).detail) } : m));
     window.addEventListener(YOWKBITS_EVENT, onSpend);
+    const onMessages = (e: Event) => setMe((m) => (m ? { ...m, unread_messages: Number((e as CustomEvent).detail) } : m));
+    window.addEventListener(MESSAGES_EVENT, onMessages);
     return () => {
       ctrl.abort();
       window.removeEventListener(YOWKBITS_EVENT, onSpend);
+      window.removeEventListener(MESSAGES_EVENT, onMessages);
     };
   }, [pathname]);
   return me;
@@ -105,6 +109,15 @@ export function HeaderAccount() {
               <Icon name="shield" size={20} />
             </Link>
           )}
+          <Link href="/messages" aria-label={me.unread_messages ? `Messages, ${me.unread_messages} unread` : 'Messages'} title="Messages"
+                className="relative inline-flex h-11 w-11 items-center justify-center rounded-md text-ink hover:bg-surface-2">
+            <Icon name="comment" size={20} />
+            {me.unread_messages > 0 && (
+              <span className="absolute top-1.5 right-1.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-accent px-1 font-mono text-[10px] font-semibold text-on-accent shadow-[0_0_0_2px_var(--canvas)]">
+                {me.unread_messages > 9 ? '9+' : me.unread_messages}
+              </span>
+            )}
+          </Link>
           <NotificationsBell unread={clearedFor === me ? 0 : me.unread} onRead={() => setClearedFor(me)} />
           <div ref={menuRef} className="relative hidden md:block">
             <button

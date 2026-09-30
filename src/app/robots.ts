@@ -8,7 +8,7 @@ export default function robots(): MetadataRoute.Robots {
       userAgent: '*',
       allow: '/',
       // Private or per-user pages (they also send noindex); /go and /api are redirects and endpoints.
-      disallow: ['/admin', '/api/', '/auth/', '/dashboard', '/go/', '/me', '/notifications', '/onboarding', '/settings', '/upload', '/for-you'],
+      disallow: ['/admin', '/api/', '/auth/', '/dashboard', '/go/', '/me', '/messages', '/notifications', '/onboarding', '/settings', '/upload', '/for-you'],
     },
     sitemap: `${base}/sitemap.xml`,
     host: base,

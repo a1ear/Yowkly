@@ -198,7 +198,7 @@ const REASONS: [string, string][] = [
   ['malware', 'Malware or suspicious files'], ['spam', 'Spam'], ['inappropriate', 'Inappropriate content'], ['other', 'Something else'],
 ];
 
-export function ReportDialog({ targetType, targetId, onClose }: { targetType: 'template' | 'comment' | 'post' | 'post_comment'; targetId: string; onClose: () => void }) {
+export function ReportDialog({ targetType, targetId, onClose }: { targetType: 'template' | 'comment' | 'post' | 'post_comment' | 'message'; targetId: string; onClose: () => void }) {
   const toast = useToast();
   const [reason, setReason] = useState('');
   const [details, setDetails] = useState('');

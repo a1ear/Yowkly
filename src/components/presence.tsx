@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { userStatus, type Status, type StatusMode } from '@/app/actions/friends';
+import { MESSAGES_EVENT } from '@/lib/events';
 
 export const STATUS_LABEL: Record<Status, string> = { online: 'Online', idle: 'Idle', offline: 'Offline' };
 export const MODE_OPTIONS: [StatusMode, string, string][] = [
@@ -45,6 +46,8 @@ export function PresenceHeartbeat() {
       fetch('/api/presence', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive: true,
         body: JSON.stringify({ active: Date.now() - lastInput < 10 * 60 * 1000 }),
+      }).then((r) => r.json()).then((d: { unreadMessages?: number }) => {
+        if (typeof d.unreadMessages === 'number') window.dispatchEvent(new CustomEvent(MESSAGES_EVENT, { detail: d.unreadMessages }));
       }).catch(() => {});
     };
     const events = ['pointerdown', 'keydown', 'scroll', 'pointermove'] as const;

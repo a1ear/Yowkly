@@ -5,6 +5,7 @@ import { browserClient } from '@/lib/supabase/browser';
 import { setFollow } from '@/app/actions/engagement';
 import { useToast } from './toast';
 import { Icon } from './icons';
+import { MessageButton } from './message-button';
 
 export function ProfileFollow({ userId, username }: { userId: string; username: string }) {
   const toast = useToast();
@@ -30,6 +31,8 @@ export function ProfileFollow({ userId, username }: { userId: string; username: 
   );
   if (!state.me) return <Link href={`/auth/sign-in?next=/@${username}`} className="btn btn-primary">Follow</Link>;
   return (
+    <div className="flex flex-wrap gap-2">
+    <MessageButton userId={userId} />
     <button type="button" disabled={pending} aria-pressed={state.following}
             className={`btn ${state.following ? 'btn-secondary' : 'btn-primary'}`}
             onClick={() => start(async () => {
@@ -40,5 +43,6 @@ export function ProfileFollow({ userId, username }: { userId: string; username: 
             })}>
       {state.following ? <><Icon name="check" size={16} />Following</> : 'Follow'}
     </button>
+    </div>
   );
 }

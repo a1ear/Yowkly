@@ -6,6 +6,7 @@ import { Avatar } from './bits';
 import { Icon } from './icons';
 import { STATUS_LABEL, StatusDot } from './presence';
 import { useMe } from './header-account';
+import { MessageButton } from './message-button';
 
 /** Community sidebar: your friends with their status, refreshed every minute. */
 export function FriendsSidebar() {
@@ -51,8 +52,8 @@ export function FriendsSidebar() {
 function FriendRow({ f }: { f: Friend }) {
   const status = f.status ?? 'offline';
   return (
-    <li>
-      <Link href={`/@${f.username}`} className={`flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-surface-2 ${status === 'offline' ? 'opacity-60' : ''}`}>
+    <li className="group flex items-center gap-1">
+      <Link href={`/@${f.username}`} className={`flex min-w-0 flex-1 items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-surface-2 ${status === 'offline' ? 'opacity-60' : ''}`}>
         <span className="relative shrink-0">
           <Avatar name={f.display_name} path={f.avatar_path} seed={f.username} size={34} />
           {f.status && <StatusDot status={status} size={11} className="absolute -right-0.5 -bottom-0.5" />}
@@ -62,6 +63,7 @@ function FriendRow({ f }: { f: Friend }) {
           <span className="truncate text-[12px] text-ink-3">{f.status ? STATUS_LABEL[status] : `@${f.username}`}</span>
         </span>
       </Link>
+      {f.status && <MessageButton userId={f.id} compact className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-accent-ink" />}
     </li>
   );
 }

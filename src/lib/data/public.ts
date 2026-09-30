@@ -51,6 +51,12 @@ export async function getCardsByIds(ids: string[]): Promise<TemplateCard[]> {
   return ids.map((id) => rows.find((r) => r.id === id)).filter((r): r is TemplateCard => Boolean(r));
 }
 
+export async function getCardsBySlugs(slugs: string[]): Promise<TemplateCard[]> {
+  if (!slugs.length) return [];
+  const res = await cards().in('slug', slugs);
+  return unwrap<TemplateCard[]>(res, 'templates');
+}
+
 export async function getHome() {
   const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString();
   const db = publicClient(['templates', 'awards']);

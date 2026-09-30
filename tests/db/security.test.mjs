@@ -736,6 +736,82 @@ test('post images: server-picked paths, own images only, up to 4, image-only pos
   fails(await as(db, poster, `select public.update_post($1, '', '{}')`, [id]), /not found/i);
 });
 
+test('direct messages: friends chat, others request, members only, blocks, limits, private photos', async () => {
+  const amy = await createUser(db, { email: 'amy@test.dev' });
+  const bo = await createUser(db, { email: 'bo@test.dev' });
+  const cy = await createUser(db, { email: 'cy@test.dev' });   // a stranger to amy
+  const eve = await createUser(db, { email: 'eve@test.dev' }); // an outsider trying to read
+  ok(await as(db, amy, `insert into public.follows (followee_id) values ($1)`, [bo]));
+  ok(await as(db, bo, `insert into public.follows (followee_id) values ($1)`, [amy]));
+  const start = (uid, other) => as(db, uid, `select public.start_conversation($1) as id`, [other]).then((r) => (r.error ? r : { rows: r.rows, id: r.rows[0].id }));
+  const send = (uid, c, body, imgs = []) => as(db, uid, `select public.send_message($1, $2, $3::jsonb) as id`, [c, body, JSON.stringify(imgs)]);
+  const convos = async (uid) => ok(await as(db, uid, `select id, status, incoming_request, unread from public.my_conversations()`));
+
+  fails(await start(amy, amy), /yourself/);
+  fails(await as(db, amy, `insert into public.messages (conversation_id, sender_id, body) values (gen_random_uuid(), $1, 'x')`, [amy]), /permission denied/, 'direct insert');
+
+  // Friends: an ordinary chat straight away.
+  const { id: ab } = await start(amy, bo);
+  assert.equal((await start(bo, amy)).id, ab, 'one conversation per pair');
+  ok(await send(amy, ab, 'hey bo'));
+  ok(await send(bo, ab, 'hey amy'));
+  assert.deepEqual((await convos(amy)).map((c) => [c.status, c.unread]), [['active', 1]]);
+  ok(await as(db, amy, `select public.mark_conversation_read($1)`, [ab]));
+  assert.equal((await convos(amy))[0].unread, 0);
+  assert.equal(ok(await as(db, bo, `select public.my_unread_messages() as n`))[0].n, 0, 'own messages never count as unread');
+
+  // Outsiders see nothing, can't send, can't report.
+  none(await as(db, eve, `select 1 from public.messages where conversation_id = $1`, [ab]), 'outsider reads messages');
+  none(await as(db, eve, `select 1 from public.conversations where id = $1`, [ab]), 'outsider reads the conversation');
+  fails(await send(eve, ab, 'let me in'), /Conversation not found/);
+  const [m1] = await sql(`select id from public.messages where conversation_id = $1 order by created_at limit 1`, [ab]);
+  fails(await as(db, eve, `insert into public.reports (target_type, target_id, reason) values ('message', $1, 'spam')`, [m1.id]), /Message not found/);
+
+  // Strangers: a request, at most 3 messages, then the recipient decides.
+  const { id: ca } = await start(cy, amy);
+  for (const t of ['hi', 'are you there', 'third']) ok(await send(cy, ca, t));
+  fails(await send(cy, ca, 'fourth'), /up to 3 messages/);
+  const inbox = await convos(amy);
+  assert.deepEqual(inbox.filter((c) => c.id === ca).map((c) => [c.status, c.incoming_request]), [['request', true]]);
+  assert.equal(ok(await as(db, amy, `select public.my_unread_messages() as n`))[0].n, 0, 'requests do not ring the header badge');
+  fails(await as(db, cy, `select public.respond_to_request($1, true)`, [ca]), /Request not found/, 'the sender accepts their own request');
+  ok(await as(db, amy, `select public.respond_to_request($1, false)`, [ca]));
+  fails(await send(cy, ca, 'please'), /isn't accepting/);
+  assert.ok(!(await convos(amy)).some((c) => c.id === ca), 'declined request hidden from the decliner');
+  ok(await send(amy, ca, 'changed my mind'));   // replying reopens it
+  ok(await send(cy, ca, 'yay'));
+
+  // Blocking stops both directions; unblocking restores.
+  ok(await as(db, amy, `select public.set_block($1, true)`, [cy]));
+  fails(await send(cy, ca, 'blocked?'), /can't message/);
+  fails(await send(amy, ca, 'me neither?'), /can't message/);
+  none(await as(db, cy, `select 1 from public.user_blocks`), 'blocked person sees the block list');
+  ok(await as(db, amy, `select public.set_block($1, false)`, [cy]));
+
+  // Unsend: sender only; the text is gone for both.
+  const [mine] = ok(await send(amy, ab, 'oops'));
+  fails(await as(db, bo, `select public.delete_message($1)`, [mine.id]), /not found/i, 'unsend someone else\'s message');
+  ok(await as(db, amy, `select public.delete_message($1)`, [mine.id]));
+  assert.equal((await sql(`select body from public.messages where id = $1`, [mine.id]))[0].body, '');
+
+  // Photos: server-issued paths, own and unsent only, visible to members only.
+  const [{ p }] = ok(await as(db, amy, `select public.prepare_message_image('webp', 800, 600) as p`));
+  assert.match(p, new RegExp(`^dm/${amy}/[0-9a-f-]{36}\\.webp$`));
+  fails(await as(db, amy, `select public.prepare_message_image('svg', 10, 10)`), /PNG, JPG/);
+  fails(await send(bo, ab, '', [{ path: p }]), /isn't yours/, 'send someone else\'s photo');
+  ok(await send(amy, ab, '', [{ path: p }]));
+  fails(await send(amy, ab, 'again', [{ path: p }]), /already sent/);
+  assert.deepEqual(ok(await as(db, bo, `select * from public.visible_message_images(array[$1])`, [p])).length, 1);
+  none(await as(db, eve, `select * from public.visible_message_images(array[$1])`, [p]), 'outsider gets a photo link');
+  fails(await as(db, eve, `select * from public.message_images`), /permission denied/);
+
+  // Moderators read a message only after a member reports it.
+  none(await as(db, u.mod, `select id from public.reported_messages(array[$1]::uuid[])`, [m1.id]), 'mod reads an unreported message');
+  none(await as(db, u.mod, `select 1 from public.messages where id = $1`, [m1.id]), 'mod reads messages directly');
+  ok(await as(db, bo, `insert into public.reports (target_type, target_id, reason) values ('message', $1, 'spam')`, [m1.id]));
+  assert.equal(ok(await as(db, u.mod, `select body from public.reported_messages(array[$1]::uuid[])`, [m1.id]))[0].body, 'hey bo');
+});
+
 test('reports are private to the reporter and moderators', async () => {
   ok(await as(db, u.bob, `insert into public.reports (target_type, target_id, reason) values ('template', $1, 'broken')`, [s.tpl]));
   none(await as(db, u.alice, `select id from public.reports`));

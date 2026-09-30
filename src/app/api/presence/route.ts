@@ -17,5 +17,6 @@ export async function POST(request: Request) {
   if (!rl.ok) return NextResponse.json({ ok: false }, { status: 429, headers });
   const body = await request.json().catch(() => ({}));
   const { error } = await db.rpc('touch_presence', { p_active: body?.active === true });
-  return NextResponse.json({ ok: !error }, { status: error ? 500 : 200, headers });
+  const { data: unread } = await db.rpc('my_unread_messages');
+  return NextResponse.json({ ok: !error, unreadMessages: (unread as number | null) ?? 0 }, { status: error ? 500 : 200, headers });
 }

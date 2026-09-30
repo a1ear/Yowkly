@@ -66,3 +66,23 @@ export async function deleteObjects(objects: { bucket: string; storage_path: str
   }));
 }
 
+
+/**
+ * Pre-signed GET for showing a private image inline (chat photos). Short-lived:
+ * the page asks for fresh links when it needs them, and only members of the
+ * conversation ever get one (visible_message_images).
+ */
+export async function presignView(bucket: LogicalBucket, key: string, expiresIn = 3600) {
+  const url = objectUrl(bucket, key);
+  url.searchParams.set('X-Amz-Expires', String(expiresIn));
+  const signed = await r2().sign(url, { method: 'GET', aws: { signQuery: true } });
+  return signed.url;
+}
+
+/** Server-side upload (the server has already checked the bytes). */
+export async function putObject(bucket: LogicalBucket, key: string, body: ArrayBuffer, contentType: string) {
+  const res = await r2().fetch(objectUrl(bucket, key), {
+    method: 'PUT', body, headers: { 'content-type': contentType, 'content-length': String(body.byteLength) },
+  });
+  if (!res.ok) throw new Error(`R2 upload failed with ${res.status}`);
+}
