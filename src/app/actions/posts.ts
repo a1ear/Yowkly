@@ -41,6 +41,10 @@ export async function startPostImageUpload(contentType: string, size: number): P
   const a = await authed('upload');
   if ('error' in a) return a.error;
   const { data: path, error } = await a.db.rpc('prepare_post_image', { p_content_type: contentType, p_size: size });
+  if (error?.code === 'PGRST202') {
+    console.error('[posts] prepare_post_image is missing: run `supabase db push`');
+    return fail('Photo uploads are being set up. Try again in a few minutes.');
+  }
   if (error) return fail(toUserError(error));
   try {
     return { ok: true, data: { path: path as string, url: await presignUpload('media', path as string, { contentType, size }) } };

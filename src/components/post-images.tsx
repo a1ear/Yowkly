@@ -18,6 +18,8 @@ const SHAPES: CropShape[] = [
 export type PostImageDraft = {
   key: string; preview: string; state: 'uploading' | 'ready' | 'failed';
   progress: number; path?: string; width?: number; height?: number; alt: string;
+  /** Why it failed, and the file so it can be retried. */
+  error?: string; file?: File;
 };
 export type PostImage = { path: string; alt: string | null; width: number | null; height: number | null };
 
@@ -35,10 +37,10 @@ export function PostImagePicker({ images, setImages }: {
   const [queue, setQueue] = useState<File[]>([]);
   const patch = (key: string, p: Partial<PostImageDraft>) => setImages((list) => list.map((i) => (i.key === key ? { ...i, ...p } : i)));
 
-  const upload = async (file: File) => {
-    const key = crypto.randomUUID();
-    const preview = URL.createObjectURL(file);
-    setImages((list) => [...list, { key, preview, state: 'uploading', progress: 0, alt: '' }]);
+  const upload = async (file: File, retryKey?: string) => {
+    const key = retryKey ?? crypto.randomUUID();
+    if (retryKey) patch(key, { state: 'uploading', progress: 0, error: undefined });
+    else setImages((list) => [...list, { key, preview: URL.createObjectURL(file), state: 'uploading', progress: 0, alt: '', file }]);
     try {
       const img = await shrinkImage(file, 1600);
       const start = await startPostImageUpload(img.type, img.blob.size);
@@ -46,8 +48,9 @@ export function PostImagePicker({ images, setImages }: {
       await putWithProgress(start.data.url, img.blob, img.type, (sent) => patch(key, { progress: sent / img.blob.size })).done;
       patch(key, { state: 'ready', progress: 1, path: start.data.path, width: img.width, height: img.height });
     } catch (e) {
-      patch(key, { state: 'failed' });
-      toast({ text: e instanceof Error ? e.message : 'Upload failed. Try again.', tone: 'error' });
+      const message = e instanceof Error ? e.message : 'Upload failed. Try again.';
+      patch(key, { state: 'failed', error: message });
+      toast({ text: message, tone: 'error' });
     }
   };
 
@@ -79,7 +82,12 @@ export function PostImagePicker({ images, setImages }: {
                   <span className="block h-full bg-accent transition-[width]" style={{ width: `${Math.round(i.progress * 100)}%` }} />
                 </span>
               )}
-              {i.state === 'failed' && <span className="absolute inset-x-0 top-[calc(50%-20px)] text-center text-[12px] text-danger">Upload failed</span>}
+              {i.state === 'failed' && (
+                <span role="alert" className="absolute inset-x-3 top-[calc(50%-34px)] flex flex-col items-center gap-1.5 text-center text-[12px] text-danger">
+                  <span className="line-clamp-2">{i.error ?? 'Upload failed'}</span>
+                  {i.file && <button type="button" onClick={() => upload(i.file!, i.key)} className="btn btn-secondary h-7 px-2.5 text-[12px]">Retry</button>}
+                </span>
+              )}
               <button type="button" aria-label="Remove image" onClick={() => { URL.revokeObjectURL(i.preview); setImages((list) => list.filter((x) => x.key !== i.key)); }}
                       className="absolute top-2.5 right-2.5 inline-flex h-8 w-8 items-center justify-center rounded-full bg-[rgba(15,14,12,.75)] text-[#F2EFE8] hover:bg-[rgba(15,14,12,.9)]">
                 <Icon name="x" size={14} />
