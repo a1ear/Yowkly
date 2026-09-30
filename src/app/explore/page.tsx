@@ -9,5 +9,5 @@ export const metadata: Metadata = {
 
 export default async function ExplorePage(props: PageProps<'/explore'>) {
   const params = exploreParams.parse(await props.searchParams);
-  return <ExploreView params={params} base="/explore" title="Explore" description="Templates, app designs and kits from the community." />;
+  return <ExploreView params={params} base="/explore" title="Explore" description="Inspo, templates, app designs and kits from the community." />;
 }

@@ -6,8 +6,13 @@ import { signOut as serverSignOut } from '@/app/actions/auth';
 import { YOWKBITS_EVENT } from '@/lib/events';
 import { Icon } from './icons';
 import { Avatar } from './bits';
+import { NotificationsBell } from './notifications-popover';
 
-type Me = { id: string; username: string; display_name: string; avatar_path: string | null; unread: number; balance: number };
+type Me = {
+  id: string; username: string; display_name: string; avatar_path: string | null; unread: number; balance: number;
+  /** Staff role for the admin panel link: 'admin', 'moderator', 'reviewer' (sub-admin) or null. */
+  role: 'admin' | 'moderator' | 'reviewer' | null;
+};
 
 /**
  * Loads the signed-in user in the browser so every public page can stay cached.
@@ -39,6 +44,8 @@ export function useMe() {
 export function HeaderAccount() {
   const me = useMe();
   const [open, setOpen] = useState(false);
+  // Cleared locally for this copy of `me`; the next /api/me load brings the real count back.
+  const [clearedFor, setClearedFor] = useState<Me | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
@@ -83,14 +90,13 @@ export function HeaderAccount() {
             <Icon name="bit" size={15} strokeWidth={2} className="text-accent-ink" />
             <span key={me.balance} className="count-pop">{me.balance}</span>
           </Link>
-          <Link
-            href="/notifications"
-            aria-label={me.unread ? `Notifications, ${me.unread} unread` : 'Notifications'}
-            className="relative inline-flex h-11 w-11 items-center justify-center rounded-md text-ink hover:bg-surface-2"
-          >
-            <Icon name="bell" size={20} />
-            {me.unread > 0 && <span className="absolute top-2.5 right-[11px] h-2 w-2 rounded-full bg-accent shadow-[0_0_0_2px_var(--canvas)]" />}
-          </Link>
+          {me.role && (
+            <Link href="/admin" title={me.role === 'reviewer' ? 'Review queue' : 'Admin panel'} aria-label={me.role === 'reviewer' ? 'Review queue' : 'Admin panel'}
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-md text-ink hover:bg-surface-2 hover:text-accent-ink">
+              <Icon name="shield" size={20} />
+            </Link>
+          )}
+          <NotificationsBell unread={clearedFor === me ? 0 : me.unread} onRead={() => setClearedFor(me)} />
           <div ref={menuRef} className="relative hidden md:block">
             <button
               type="button"
@@ -109,6 +115,7 @@ export function HeaderAccount() {
                   [`/@${me.username}`, 'Your profile', 'user'],
                   ['/dashboard', 'Creator dashboard', 'grid'],
                   ['/settings', 'Settings', 'settings'],
+                  ...(me.role ? [['/admin', me.role === 'reviewer' ? 'Review queue' : 'Admin panel', 'shield']] : []),
                 ].map(([href, label, icon]) => (
                   <Link key={href} role="menuitem" href={href} onClick={() => setOpen(false)}
                         className="flex h-10 items-center gap-2.5 rounded-md px-3 text-sm text-ink hover:bg-surface-2">

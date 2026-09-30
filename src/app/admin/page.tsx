@@ -6,29 +6,39 @@ import { Cover } from '@/components/cover';
 import { StatusPill } from '@/components/status-pill';
 import { EmptyState } from '@/components/bits';
 import { TemplateModActions, ReportActions, PostRemoveAction } from '@/components/admin/mod-actions';
+import { SubAdminToggle } from '@/components/admin/sub-admins';
+import { Avatar } from '@/components/bits';
 import { formatBytes, timeAgo } from '@/lib/format';
 import type { TemplateCard } from '@/lib/types';
 
-export const metadata: Metadata = { title: 'Moderation', robots: { index: false } };
+export const metadata: Metadata = { title: 'Admin panel', robots: { index: false } };
+
+type Candidate = { id: string; username: string; display_name: string; avatar_path: string | null; is_sub_admin: boolean; follows_you: boolean };
 
 export default async function AdminPage(props: PageProps<'/admin'>) {
   const sp = await props.searchParams;
-  const tab = sp.tab === 'reports' ? 'reports' : sp.tab === 'log' ? 'log' : 'queue';
   const db = await userClient();
   const { data: claims } = await db.auth.getClaims();
   if (!claims?.claims?.sub) redirect('/auth/sign-in?next=/admin');
   // Server-side role check. Hiding the link is courtesy; this is the gate (and every RPC checks again).
-  const { data: isMod } = await db.rpc('is_moderator');
-  if (!isMod) notFound();
+  // Sub-admins ('reviewer') get the review queue only; reports, the audit log and the team are for moderators/admins.
+  const { data: role } = await db.rpc('my_staff_role');
+  if (!role) notFound();
+  const isMod = role === 'admin' || role === 'moderator';
+  const isAdmin = role === 'admin';
+  const allowed = ['queue', ...(isMod ? ['reports', 'log'] : []), ...(isAdmin ? ['team'] : [])];
+  const tab = allowed.includes(String(sp.tab)) ? String(sp.tab) : 'queue';
 
   const [{ data: queue }, { data: reports }, { data: log }] = await Promise.all([
     db.from('template_cards').select('*').eq('status', 'pending_review').order('created_at'),
-    db.from('reports').select('id, target_type, target_id, reason, details, created_at, reporter:profiles!reports_reporter_id_fkey(username)')
-      .eq('status', 'open').order('created_at').limit(100),
+    isMod ? db.from('reports').select('id, target_type, target_id, reason, details, created_at, reporter:profiles!reports_reporter_id_fkey(username)')
+      .eq('status', 'open').order('created_at').limit(100) : Promise.resolve({ data: [] as Record<string, unknown>[] }),
     tab === 'log' ? db.from('moderation_log').select('id, action, target_type, target_id, reason, created_at, actor:profiles!moderation_log_actor_id_fkey(username)')
       .order('created_at', { ascending: false }).limit(100) : Promise.resolve({ data: [] }),
   ]);
   const pending = (queue ?? []) as TemplateCard[];
+  const { data: cand } = tab === 'team' ? await db.rpc('sub_admin_candidates') : { data: [] };
+  const candidates = (cand ?? []) as Candidate[];
   // Reported posts: show what was said and who said it, so the report can be judged.
   const postIds = (reports ?? []).filter((r) => r.target_type === 'post').map((r) => r.target_id as string);
   const { data: reportedPosts } = postIds.length
@@ -46,9 +56,11 @@ export default async function AdminPage(props: PageProps<'/admin'>) {
 
   return (
     <div className="mx-auto max-w-[1200px] px-4 pt-10 md:px-10">
-      <h1 className="m-0 font-display text-5xl font-normal">Moderation</h1>
+      <h1 className="m-0 font-display text-5xl font-normal">{isMod ? 'Admin panel' : 'Review queue'}</h1>
+      {!isMod && <p className="m-0 mt-2 text-ink-2">As a sub-admin you can approve uploads or ask the creator for changes.</p>}
       <nav aria-label="Moderation sections" className="mt-6 flex gap-1 border-b border-line">
-        {[['queue', `Review queue (${pending.length})`], ['reports', `Reports (${(reports ?? []).length})`], ['log', 'Audit log']].map(([id, label]) => (
+        {([['queue', `Review queue (${pending.length})`], ['reports', `Reports (${(reports ?? []).length})`], ['log', 'Audit log'], ['team', 'Sub-admins']] as const)
+          .filter(([id]) => allowed.includes(id)).map(([id, label]) => (
           <Link key={id} href={`/admin?tab=${id}`} aria-current={tab === id ? 'page' : undefined}
                 className="-mb-px inline-flex h-11 items-center border-b-2 border-transparent px-3 text-sm font-medium text-ink-2 aria-[current=page]:border-accent aria-[current=page]:text-ink">{label}</Link>
         ))}
@@ -70,11 +82,34 @@ export default async function AdminPage(props: PageProps<'/admin'>) {
                     ))}
                   </ul>
                 </div>
-                <TemplateModActions id={t.id} status={t.status} />
+                <TemplateModActions id={t.id} status={t.status} canRemove={isMod} />
               </li>
             ))}
           </ul>
         ))}
+
+        {tab === 'team' && (
+          <section aria-labelledby="team-title" className="flex flex-col gap-4">
+            <div>
+              <h2 id="team-title" className="m-0 text-lg font-semibold">Sub-admins</h2>
+              <p className="m-0 text-[13px] text-ink-2">Pick from people who follow you. Sub-admins can approve uploads or ask for changes. They can&apos;t remove templates, see reports or the audit log, or add other sub-admins.</p>
+            </div>
+            {candidates.length === 0 ? <EmptyState title="No followers yet" body="When people follow you, you can make them sub-admins here." /> : (
+              <ul className="m-0 flex list-none flex-col gap-2 p-0">
+                {candidates.map((c) => (
+                  <li key={c.id} className="flex items-center gap-3 rounded-xl bg-surface-1 p-3 shadow-[inset_0_0_0_1px_var(--line)]">
+                    <Avatar name={c.display_name} path={c.avatar_path} seed={c.username} size={40} />
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <Link href={`/@${c.username}`} className="truncate font-semibold hover:text-accent-ink">{c.display_name}</Link>
+                      <span className="truncate text-[13px] text-ink-3">@{c.username}{c.is_sub_admin ? ' · Sub-admin' : ''}{!c.follows_you ? ' · no longer follows you' : ''}</span>
+                    </span>
+                    <SubAdminToggle userId={c.id} on={c.is_sub_admin} canGrant={c.follows_you} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
 
         {tab === 'reports' && ((reports ?? []).length === 0 ? <EmptyState title="No open reports" /> : (
           <ul className="m-0 flex list-none flex-col gap-3 p-0">

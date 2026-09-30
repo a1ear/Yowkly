@@ -4,7 +4,7 @@ import { createServerClient } from '@supabase/ssr';
 // Refreshes the Supabase session cookie and guards private areas.
 // This is a redirect for convenience only: every private page and action
 // checks the user again on the server, and RLS checks it again in Postgres.
-const PRIVATE = ['/dashboard', '/settings', '/upload', '/notifications', '/for-you', '/admin', '/onboarding'];
+const PRIVATE = ['/dashboard', '/settings', '/upload', '/for-you', '/admin', '/onboarding'];
 
 export async function proxy(request: NextRequest) {
   // Supabase sends the sign-up link to the site root (with ?code=) when its redirect

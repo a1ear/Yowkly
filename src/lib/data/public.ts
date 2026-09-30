@@ -19,6 +19,16 @@ export async function getCategories(): Promise<Category[]> {
   return unwrap(res, 'categories');
 }
 
+/** Tags suggested per category (e.g. Canva, PowerPoint, Keynote for Presentations), keyed by category id. */
+export async function getFeaturedTags(): Promise<Map<number, { slug: string; name: string }[]>> {
+  const res = await publicClient(['categories'], 3600).from('category_featured_tags')
+    .select('category_id, sort, tag:tags(slug, name)').order('sort');
+  const rows = unwrap<{ category_id: number; tag: { slug: string; name: string } | null }[]>(res, 'featured tags');
+  const map = new Map<number, { slug: string; name: string }[]>();
+  for (const r of rows) if (r.tag) map.set(r.category_id, [...(map.get(r.category_id) ?? []), r.tag]);
+  return map;
+}
+
 export async function getLicenses(): Promise<License[]> {
   const db = publicClient(['licenses'], 3600);
   const res = await db.from('licenses').select('code, name, url, summary, allows_commercial, requires_attribution').order('sort');

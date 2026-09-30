@@ -34,17 +34,20 @@ export default async function UploadStepPage(props: PageProps<'/upload/[id]'>) {
   const [categories, tags, licenses] = await Promise.all([getCategories(), getTagsByType(), getLicenses()]);
   const category = categories.find((c) => c.id === t.category_id);
   const isMobile = category?.kind === 'mobile';
+  const isInspo = category?.kind === 'inspo';
 
   const clean = d.files.filter((f) => f.scan_status === 'clean').length;
   const scanning = d.files.filter((f) => f.scan_status === 'pending' || f.scan_status === 'scanning').length;
   const rejected = d.files.filter((f) => f.scan_status === 'infected' || f.scan_status === 'rejected').length;
   const cover = d.media.find((m) => m.kind === 'cover');
-  const hasSource = d.files.length > 0 || d.links.length > 0 || Boolean(t.demo_url);
+  // Inspo has nothing to download: the cover and screenshots are the work.
+  const hasSource = isInspo || d.files.length > 0 || d.links.length > 0 || Boolean(t.demo_url);
   const checks: { ok: boolean; label: string; optional?: boolean; step: number }[] = [
     { ok: Boolean(t.title && t.category_id), label: 'Title and category', step: 1 },
     { ok: hasSource && scanning === 0 && rejected === 0, step: 2,
       label: rejected ? `${rejected} file${rejected > 1 ? 's' : ''} rejected by the scan: remove before publishing`
         : scanning ? `${scanning} file${scanning > 1 ? 's' : ''} still being scanned`
+        : isInspo ? 'Showcase only: no files needed'
         : hasSource ? `${clean} file${clean === 1 ? '' : 's'} scanned clean${d.links.length ? `, ${d.links.length} link${d.links.length > 1 ? 's' : ''}` : ''}` : 'Add a file, a link or a demo URL' },
     { ok: Boolean(cover), label: cover ? `Cover + ${d.media.length - 1} more image${d.media.length === 2 ? '' : 's'}, all with alt text` : 'Add a cover image', step: 3 },
     { ok: Boolean(draft?.license_code), label: draft?.license_code ? `${draft.license_code} license · v${draft.version}` : 'Choose a license', step: 4 },
@@ -93,10 +96,10 @@ export default async function UploadStepPage(props: PageProps<'/upload/[id]'>) {
           )}
           {needsVersion && <NewVersion templateId={t.id} latest={d.latestPublished?.version ?? null} step={step}
             doneHref={t.status === 'published' || t.status === 'unlisted' ? `/t/${t.slug}` : '/dashboard'} />}
-          {step === 2 && draft && <SourceStep templateId={t.id} versionId={draft.id} files={d.files} links={d.links} demoUrl={t.demo_url} />}
+          {step === 2 && draft && <SourceStep templateId={t.id} versionId={draft.id} files={d.files} links={d.links} demoUrl={t.demo_url} inspo={isInspo} />}
           {step === 3 && <MediaStep templateId={t.id} media={d.media} isMobile={isMobile} />}
           {step === 4 && draft && (
-            <LicenseForm templateId={t.id} versionId={draft.id} licenses={licenses} previous={d.latestPublished?.version ?? null}
+            <LicenseForm templateId={t.id} versionId={draft.id} licenses={licenses} inspo={isInspo} previous={d.latestPublished?.version ?? null}
               initial={{ license: draft.license_code, version: draft.version, changelog: draft.changelog }} />
           )}
           {step === 5 && draft && (

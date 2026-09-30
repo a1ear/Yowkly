@@ -33,7 +33,7 @@ export function TemplateCard({ t, priority = false, tall = false }: { t: Card; p
             <Avatar name={t.owner_display_name} path={t.owner_avatar_path} seed={t.owner_username} />
             <span className="truncate">{t.owner_display_name}</span>
           </span>
-          <Stats votes={t.vote_count} likes={t.like_count} downloads={t.download_count} />
+          <Stats votes={t.vote_count} likes={t.like_count} downloads={t.category_kind === 'inspo' ? null : t.download_count} />
         </div>
         <div className="flex flex-wrap items-center gap-[5px]">
           {tools.map((tool) => <span key={tool} className="chip-tool">{tool}</span>)}
@@ -57,7 +57,7 @@ export function TemplateRow({ t }: { t: Card }) {
           {t.owner_display_name} · {displayTools(t.tools).join(', ') || t.category_name}
         </span>
       </div>
-      <Stats votes={t.vote_count} likes={t.like_count} downloads={t.download_count} />
+      <Stats votes={t.vote_count} likes={t.like_count} downloads={t.category_kind === 'inspo' ? null : t.download_count} />
       <Icon name="chevronRight" size={16} className="text-ink-3" />
     </article>
   );

@@ -42,14 +42,14 @@ export function LicensePill({ code }: { code: string | null }) {
 }
 
 /** Votes (paid in yowkbits, drive the Ranking) are shown apart from likes (free). */
-export function Stats({ votes, likes, downloads, size = 'sm' }: { votes: number; likes: number; downloads: number; size?: 'sm' | 'md' }) {
+export function Stats({ votes, likes, downloads, size = 'sm' }: { votes: number; likes: number; downloads: number | null; size?: 'sm' | 'md' }) {
   return (
     <div className={`flex items-center gap-3 font-mono text-ink-3 ${size === 'md' ? 'text-[13px]' : 'text-xs'}`}>
       <span className={`inline-flex items-center gap-1 ${votes > 0 ? 'text-accent-ink' : ''}`} aria-label={`${formatCount(votes)} vote${votes === 1 ? '' : 's'}`}>
         <Icon name="bit" size={12} strokeWidth={2} />{formatCount(votes)}
       </span>
       <span className="inline-flex items-center gap-1" aria-label={`${formatCount(likes)} like${likes === 1 ? '' : 's'}`}><Icon name="heart" size={12} strokeWidth={2} />{formatCount(likes)}</span>
-      <span className="inline-flex items-center gap-1" aria-label={`${formatCount(downloads)} download${downloads === 1 ? '' : 's'}`}><Icon name="download" size={12} strokeWidth={2} />{formatCount(downloads)}</span>
+      {downloads !== null && <span className="inline-flex items-center gap-1" aria-label={`${formatCount(downloads)} download${downloads === 1 ? '' : 's'}`}><Icon name="download" size={12} strokeWidth={2} />{formatCount(downloads)}</span>}
     </div>
   );
 }

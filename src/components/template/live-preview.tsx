@@ -13,9 +13,11 @@ const DEVICES: [string, string, IconName, number][] = [
  * the sandbox can allow scripts + same-origin for that site without giving it
  * any access to Yowkly. No top navigation, no downloads, no referrer.
  */
-export function LivePreview({ url }: { url: string | null }) {
+export function LivePreview({ url, showcase = false }: { url: string | null; showcase?: boolean }) {
   const [device, setDevice] = useState('desktop');
   const [loaded, setLoaded] = useState(false);
+  // The demo only takes the mouse wheel after a click, so scrolling the page never gets stuck in it.
+  const [active, setActive] = useState(false);
   const width = DEVICES.find((d) => d[0] === device)![3];
   let host = '';
   try { host = url ? new URL(url).host : ''; } catch { host = ''; }
@@ -46,7 +48,9 @@ export function LivePreview({ url }: { url: string | null }) {
             <span className="flex gap-1.5" aria-hidden="true">{[0, 1, 2].map((i) => <span key={i} className="h-2.5 w-2.5 rounded-full bg-surface-3" />)}</span>
             <span className="mx-auto max-w-[60%] truncate rounded-sm bg-surface-1 px-3 py-0.5 font-mono text-[11px] text-ink-3">{host}</span>
           </div>
-          <div className="relative flex h-[560px] justify-center bg-canvas">
+          <div className="relative flex h-[560px] justify-center bg-canvas"
+               onMouseLeave={() => setActive(false)}
+               onKeyDown={(e) => e.key === 'Escape' && setActive(false)}>
             {!loaded && <div className="skeleton absolute inset-4" aria-label="Loading preview" />}
             <iframe
               src={url}
@@ -58,12 +62,26 @@ export function LivePreview({ url }: { url: string | null }) {
               className="h-full border-0 bg-white transition-[width] duration-300"
               style={{ width: width === 100 ? '100%' : width, maxWidth: '100%' }}
             />
+            {!active && loaded && (
+              <button type="button" onClick={() => setActive(true)} aria-label="Interact with the live demo"
+                      className="group absolute inset-0 flex cursor-pointer items-end justify-center bg-transparent pb-5">
+                <span className="inline-flex items-center gap-2 rounded-full bg-[rgba(15,14,12,.78)] px-4 py-2 text-[13px] font-medium text-[#F2EFE8] shadow-e2 backdrop-blur transition-opacity group-hover:opacity-100 md:opacity-0">
+                  <Icon name="monitor" size={15} />Click to scroll and interact
+                </span>
+              </button>
+            )}
+            {active && (
+              <button type="button" onClick={() => setActive(false)}
+                      className="absolute top-3 right-3 inline-flex h-9 items-center gap-1.5 rounded-full bg-[rgba(15,14,12,.78)] px-3 text-[12px] text-[#F2EFE8] backdrop-blur">
+                <Icon name="x" size={13} />Done
+              </button>
+            )}
           </div>
         </div>
       ) : (
         <div className="flex h-48 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-line text-center text-ink-2">
           <Icon name="monitor" size={22} className="text-ink-3" />
-          <p className="m-0">No live demo for this one. Browse the screens above or download the files.</p>
+          <p className="m-0">{showcase ? 'No live site for this one. Browse the screens above.' : 'No live demo for this one. Browse the screens above or download the files.'}</p>
         </div>
       )}
     </section>

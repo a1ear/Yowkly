@@ -12,7 +12,7 @@ import { formatCompact } from '@/lib/format';
 export const revalidate = 60;
 
 const CHIPS: [string, string][] = [
-  ['/explore', 'All'], ['/c/websites', 'Websites'], ['/c/mobile-apps', 'Mobile Apps'], ['/c/ui-kits', 'UI Kits'],
+  ['/explore', 'All'], ['/c/inspo', 'Inspo'], ['/c/websites', 'Websites'], ['/c/mobile-apps', 'Mobile Apps'], ['/c/ui-kits', 'UI Kits'],
   ['/c/components', 'Components'], ['/c/presentations', 'Presentations'], ['/c/concepts', 'Concepts'],
 ];
 

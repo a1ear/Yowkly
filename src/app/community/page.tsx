@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { communityParams, getPopularPostTags, getPosts, POST_PAGE_SIZE } from '@/lib/data/posts';
+import { communityParams, getPosts, POST_PAGE_SIZE } from '@/lib/data/posts';
 import { PostComposer, PostList } from '@/components/posts';
 import { Icon } from '@/components/icons';
 import { formatCount } from '@/lib/format';
@@ -14,7 +14,7 @@ export const metadata: Metadata = {
 
 export default async function CommunityPage(props: PageProps<'/community'>) {
   const { tag, page } = communityParams.parse(await props.searchParams);
-  const [{ rows, total }, popular] = await Promise.all([getPosts({ tag, page }), getPopularPostTags()]);
+  const { rows, total } = await getPosts({ tag, page });
   const pages = Math.max(1, Math.ceil(total / POST_PAGE_SIZE));
   const href = (p: number) => {
     const qs = new URLSearchParams({ ...(tag ? { tag } : {}), ...(p > 1 ? { page: String(p) } : {}) }).toString();
@@ -27,19 +27,15 @@ export default async function CommunityPage(props: PageProps<'/community'>) {
 
       <div><PostComposer /></div>
 
-      {(popular.length > 0 || tag) && (
-        <nav aria-label="Post tags" className="mt-6 flex flex-wrap gap-2">
-          <Link href="/community" aria-current={!tag ? 'page' : undefined} className="filter-chip">All</Link>
-          {tag && !popular.some((p) => p.tag === tag) && <Link href={`/community?tag=${tag}`} aria-current="page" className="filter-chip">#{tag}</Link>}
-          {popular.map((p) => (
-            <Link key={p.tag} href={`/community?tag=${p.tag}`} aria-current={tag === p.tag ? 'page' : undefined} className="filter-chip">#{p.tag}</Link>
-          ))}
-        </nav>
-      )}
 
       <section aria-label={tag ? `Posts tagged ${tag}` : 'Latest posts'} className="mt-6 flex flex-col gap-4">
-        {tag && <p className="m-0 text-[13px] text-ink-3">{formatCount(total)} post{total === 1 ? '' : 's'} tagged #{tag}</p>}
-        <PostList posts={rows} emptyText={tag ? `No posts tagged #${tag} yet.` : 'No posts yet. Be the first to share something.'} />
+        {tag && (
+          <p className="m-0 flex items-center gap-2 text-[13px] text-ink-3">
+            {formatCount(total)} post{total === 1 ? '' : 's'} tagged <span className="text-ink">{tag}</span>
+            <Link href="/community" className="text-accent-ink underline-offset-4 hover:underline">Show all</Link>
+          </p>
+        )}
+        <PostList posts={rows} emptyText={tag ? `No posts tagged ${tag} yet.` : 'No posts yet. Be the first to share something.'} />
       </section>
 
       {pages > 1 && (

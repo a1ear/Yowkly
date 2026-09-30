@@ -7,10 +7,17 @@ import { putWithProgress } from '@/lib/upload-client';
 import { shrinkImage } from '@/lib/image-shrink';
 import { useToast } from '../toast';
 import { Icon } from '../icons';
+import { ImageCropper, type CropShape } from '../image-cropper';
 import { mediaUrl } from '@/lib/labels';
 import type { DraftMedia } from '@/lib/data/draft';
 
 const TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/avif', 'image/gif'];
+
+const SHAPES: Record<'cover' | 'gallery' | 'mobile_screen', CropShape[]> = {
+  cover: [{ label: 'Cover (16:10)', aspect: 16 / 10 }],
+  gallery: [{ label: '16:10', aspect: 16 / 10 }, { label: '16:9', aspect: 16 / 9 }, { label: '4:3', aspect: 4 / 3 }, { label: 'Square', aspect: 1 }, { label: 'Original', aspect: null }],
+  mobile_screen: [{ label: 'Phone (9:19.5)', aspect: 9 / 19.5 }, { label: 'Original', aspect: null }],
+};
 
 export function MediaStep({ templateId, media, isMobile }: { templateId: string; media: DraftMedia[]; isMobile: boolean }) {
   const cover = media.find((m) => m.kind === 'cover');
@@ -50,7 +57,14 @@ function AddImage({ templateId, kind, label }: { templateId: string; kind: 'cove
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [alt, setAlt] = useState('');
+  const [cropping, setCropping] = useState<File | null>(null);
   const [pending, start] = useTransition();
+
+  const use = (f: File) => {
+    setCropping(null);
+    if (f.type === 'image/gif') return use(f);
+    setCropping(f);
+  };
 
   const pick = (f?: File) => {
     if (!f) return;
@@ -82,6 +96,7 @@ function AddImage({ templateId, kind, label }: { templateId: string; kind: 'cove
   if (!file) {
     return (
       <div>
+        {cropping && <ImageCropper file={cropping} shapes={SHAPES[kind]} title={kind === 'cover' ? 'Crop cover image' : 'Crop image'} onDone={use} onCancel={() => setCropping(null)} />}
         <button type="button" onClick={() => input.current?.click()} className="btn btn-secondary"><Icon name="plus" size={16} />{label}</button>
         <input ref={input} type="file" accept={TYPES.join(',')} hidden onChange={(e) => { pick(e.target.files?.[0]); e.target.value = ''; }} />
       </div>
@@ -99,6 +114,7 @@ function AddImage({ templateId, kind, label }: { templateId: string; kind: 'cove
         </label>
         <div className="flex gap-2">
           <button type="button" onClick={save} disabled={pending} className="btn btn-primary">{pending ? 'Uploading…' : 'Save image'}</button>
+          <button type="button" onClick={() => { const f = file; setFile(null); setPreview(null); if (f.type !== 'image/gif') setCropping(f); }} className="btn btn-ghost">Re-crop</button>
           <button type="button" onClick={() => { setFile(null); setPreview(null); }} className="btn btn-ghost">Cancel</button>
         </div>
       </div>

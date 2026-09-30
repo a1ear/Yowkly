@@ -46,6 +46,7 @@ export default async function TemplatePage(props: PageProps<'/t/[slug]'>) {
   const currentFiles = d.files.filter((f) => f.version_id === d.currentVersionId);
   const manifest = currentFiles.flatMap((f) => (f.manifest?.entries ?? []).map((e) => ({ ...e, file: f.original_name })));
   const visibleComments = d.comments.filter((c) => !c.deleted_at).length;
+  const inspo = card.category_kind === 'inspo';
 
   const jsonLd = {
     '@context': 'https://schema.org',
@@ -97,11 +98,11 @@ export default async function TemplatePage(props: PageProps<'/t/[slug]'>) {
               )}
             </div>
 
-            <LivePreview url={d.demoUrl} />
+            <LivePreview url={d.demoUrl} showcase={inspo} />
 
             <DetailTabs tabs={[
               { id: 'overview', label: 'Overview', panel: d.description ? <SafeMarkdown text={d.description} /> : <p className="m-0 text-ink-2">No description yet.</p> },
-              {
+              ...(inspo ? [] : [              {
                 id: 'files', label: 'Files', count: currentFiles.length,
                 panel: currentFiles.length === 0 ? <p className="m-0 text-ink-2">This template is shared as a link. Use the buttons in the download panel.</p> : (
                   <div className="flex flex-col gap-4">
@@ -123,7 +124,7 @@ export default async function TemplatePage(props: PageProps<'/t/[slug]'>) {
                     )}
                   </div>
                 ),
-              },
+              }]),
               {
                 id: 'versions', label: 'Versions', count: d.versions.length,
                 panel: (
@@ -172,7 +173,19 @@ export default async function TemplatePage(props: PageProps<'/t/[slug]'>) {
               <FollowButton ownerId={card.owner_id} />
             </div>
             <OwnerTools ownerId={card.owner_id} templateId={card.id} status={card.status} />
-            <DownloadPanel versions={d.versions} files={d.files} currentVersionId={d.currentVersionId} licenses={licenses} links={d.links} />
+            {inspo ? (
+              <section aria-label="Inspo" className="flex flex-col gap-3 rounded-2xl bg-surface-1 p-5 shadow-[inset_0_0_0_1px_var(--line)]">
+                <span className="eyebrow inline-flex items-center gap-2"><Icon name="sparkle" size={14} />Inspo · showcase only</span>
+                <p className="m-0 text-[14px] text-ink-2">Shared for inspiration. There&apos;s nothing to download; all rights stay with {card.owner_display_name}. Vote for it if it inspired you.</p>
+                {d.demoUrl && (
+                  <a href={d.demoUrl} target="_blank" rel="noopener noreferrer nofollow ugc" className="btn btn-primary btn-lg">
+                    <Icon name="external" size={18} />Visit the live site
+                  </a>
+                )}
+              </section>
+            ) : (
+              <DownloadPanel versions={d.versions} files={d.files} currentVersionId={d.currentVersionId} licenses={licenses} links={d.links} />
+            )}
             <ActionRow likeCount={card.like_count} title={card.title} />
             <VoteModule voteCount={d.voteCount} />
           </aside>

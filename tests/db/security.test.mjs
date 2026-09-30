@@ -190,6 +190,13 @@ test('publish gate refuses until every requirement is met', async () => {
   ok(await as(db, 'service', `select public.complete_scan($1, 'clean', $2, $3, '{"entries": 3}'::jsonb, '{}'::jsonb, null)`,
               [s.file, `${u.alice}/${s.tpl}/${s.ver}/dashboard-kit.zip`, 'a'.repeat(64)]));
 
+  // Required details: a real description and at least one tag.
+  fails(await pub(), /description/, 'no description');
+  ok(await as(db, u.alice, `update public.templates set description = 'A dark-first analytics kit with charts, tables and settings pages.' where id = $1`, [s.tpl]));
+  fails(await pub(), /tag/, 'no tags');
+  const [react] = await sql(`select id from public.tags where slug = 'react'`);
+  ok(await as(db, u.alice, `select public.set_template_tags($1, array[$2]::int[])`, [s.tpl, react.id]));
+
   const [r] = ok(await pub());
   assert.equal(r.status, 'pending_review', 'new creators go to review');
   none(await as(db, u.bob, `select id from public.templates where id = $1`, [s.tpl]), 'visible before review');
@@ -276,7 +283,10 @@ test('voting does not depend on downloadable files: a demo-only template can be 
   const dana = await createUser(db, { email: 'dana@test.dev' }); // a voter no other test looks at
   const [m] = ok(await as(db, u.alice, `select public.prepare_media_upload($1, 'image/webp', 100000) as path`, [t]));
   ok(await as(db, u.alice, `select public.register_media($1, $2, 'cover', 'desktop', 'Landing concept preview', 1600, 1000)`, [t, m.path]));
-  ok(await as(db, u.alice, `update public.templates set demo_url = 'https://example.com/demo' where id = $1`, [t]));
+  ok(await as(db, u.alice, `update public.templates set demo_url = 'https://example.com/demo',
+      tagline = 'A landing page concept', description = 'A one-page landing concept, shown as a live demo only.' where id = $1`, [t]));
+  const [tag] = await sql(`select id from public.tags where slug = 'minimal'`);
+  ok(await as(db, u.alice, `select public.set_template_tags($1, array[$2]::int[])`, [t, tag.id]));
   ok(await as(db, u.alice, `update public.template_versions set license_code = 'MIT' where id = $1`, [row.version_id]));
   assert.equal((await sql(`select count(*)::int as n from public.template_files where template_id = $1`, [t]))[0].n, 0, 'the template has no files');
 
@@ -514,6 +524,117 @@ test('comment reactions and previews: one reaction each, private, counted; previ
   fails(await as(db, u.bob, `insert into public.post_comment_likes (comment_id) values ($1)`, [c2]), /row-level security/, 'react to a removed comment');
 });
 
+test('sub-admins: granted by an admin to a follower, may only approve or request changes; staff are notified', async () => {
+  const boss = await createUser(db, { email: 'boss@test.dev' });
+  const fan = await createUser(db, { email: 'fan@test.dev' });
+  const stranger = await createUser(db, { email: 'stranger@test.dev' });
+  const maker = await createUser(db, { email: 'maker@test.dev' });
+  await sql(`insert into public.user_roles (user_id, role) values ($1, 'admin')`, [boss]);
+  ok(await as(db, fan, `insert into public.follows (followee_id) values ($1)`, [boss]));
+
+  // Only admins grant it, only to their followers, and nobody grants it to themselves.
+  fails(await as(db, u.mod, `select public.set_sub_admin($1, true)`, [fan]), /Admins only/);
+  fails(await as(db, fan, `select public.set_sub_admin($1, true)`, [fan]), /Admins only/);
+  fails(await as(db, boss, `select public.set_sub_admin($1, true)`, [stranger]), /follow you/);
+  ok(await as(db, boss, `select public.set_sub_admin($1, true)`, [fan]));
+  assert.equal(ok(await as(db, fan, `select public.my_staff_role() as r`))[0].r, 'reviewer');
+  assert.equal(ok(await as(db, stranger, `select public.my_staff_role() as r`))[0].r, null);
+  const cands = ok(await as(db, boss, `select id, is_sub_admin from public.sub_admin_candidates()`));
+  assert.ok(cands.some((c) => c.id === fan && c.is_sub_admin));
+  none(await as(db, fan, `select id from public.sub_admin_candidates()`), 'non-admin lists candidates');
+  fails(await as(db, fan, `insert into public.user_roles (user_id, role) values ($1, 'moderator')`, [fan]), /row-level security/, 'promote yourself');
+
+  // A new creator's upload goes to review, and every staff member hears about it.
+  const [row] = ok(await as(db, maker, `select * from public.create_template('Review Me Kit', $1::smallint)`, [s.websites]));
+  const t = row.template_id;
+  const [m] = ok(await as(db, maker, `select public.prepare_media_upload($1, 'image/webp', 100000) as path`, [t]));
+  ok(await as(db, maker, `select public.register_media($1, $2, 'cover', 'desktop', 'Kit preview', 1600, 1000)`, [t, m.path]));
+  ok(await as(db, maker, `update public.templates set demo_url = 'https://review-me.vercel.app', tagline = 'A kit to review',
+      description = 'A small kit that needs a moderator to look at it first.' where id = $1`, [t]));
+  ok(await as(db, maker, `update public.template_versions set license_code = 'MIT' where id = $1`, [row.version_id]));
+  const [tag] = await sql(`select id from public.tags where slug = 'minimal'`);
+  ok(await as(db, maker, `select public.set_template_tags($1, array[$2]::int[])`, [t, tag.id]));
+  assert.equal(ok(await as(db, maker, `select public.publish_version($1, true) as s`, [row.version_id]))[0].s, 'pending_review');
+  for (const staff of [boss, fan, u.mod]) {
+    const n = ok(await as(db, staff, `select read_at from public.notifications where type = 'review_needed' and template_id = $1`, [t]));
+    assert.equal(n.length, 1, 'staff member notified');
+    assert.equal(n[0].read_at, null);
+  }
+  none(await as(db, stranger, `select 1 from public.notifications where type = 'review_needed'`), 'non-staff notified');
+
+  // The sub-admin sees the queue, can reject and approve, and can do nothing else.
+  assert.equal(ok(await as(db, fan, `select id from public.template_cards where id = $1`, [t])).length, 1, 'sub-admin sees the pending template');
+  none(await as(db, stranger, `select id from public.template_cards where id = $1`, [t]), 'stranger sees it');
+  fails(await as(db, fan, `select public.moderate_template($1, 'remove', 'not allowed')`, [t]), /Moderators only/, 'sub-admin removes');
+  fails(await as(db, fan, `select public.resolve_report($1, 'dismissed', null)`, ['00000000-0000-0000-0000-000000000000']), /Moderators only/, 'sub-admin resolves reports');
+  none(await as(db, fan, `select 1 from public.moderation_log`), 'sub-admin reads the audit log');
+  none(await as(db, fan, `select 1 from public.reports`), 'sub-admin reads reports');
+  ok(await as(db, fan, `select public.moderate_template($1, 'approve', null)`, [t]));
+  assert.equal((await sql(`select status from public.templates where id = $1`, [t]))[0].status, 'published');
+  const after = ok(await as(db, boss, `select read_at from public.notifications where type = 'review_needed' and template_id = $1`, [t]));
+  assert.ok(after[0].read_at, 'review pings are cleared once it is reviewed');
+
+  // Taking it away works, and then the queue is out of reach again.
+  ok(await as(db, boss, `select public.set_sub_admin($1, false)`, [fan]));
+  assert.equal(ok(await as(db, fan, `select public.my_staff_role() as r`))[0].r, null);
+  const log = await sql(`select action from public.moderation_log where target_id = $1 order by id`, [fan]);
+  assert.deepEqual(log.map((l) => l.action), ['grant_sub_admin', 'revoke_sub_admin']);
+});
+
+test('Inspo is showcase only: no files or source links, Showcase license, and it can be voted on', async () => {
+  const maker = await createUser(db, { email: 'inspo@test.dev' });
+  const voter = await createUser(db, { email: 'inspo-fan@test.dev' });
+  await sql(`update public.profiles set trust_level = 1 where id = $1`, [maker]);
+  const [inspo] = await sql(`select id from public.categories where slug = 'inspo-websites'`);
+  const [row] = ok(await as(db, maker, `select * from public.create_template('My Portfolio Site', $1::smallint)`, [inspo.id]));
+  const t = row.template_id, v = row.version_id;
+
+  fails(await as(db, maker, `select public.prepare_file_upload($1, 'site.zip', 1000)`, [v])
+          .then((r) => (r.error ? r : as(db, maker, `select public.register_file($1, $2, 'site.zip', 1000)`, [v, r.rows[0].prepare_file_upload]))),
+        /showcase only/i, 'file on an Inspo template');
+  fails(await as(db, maker, `insert into public.template_links (template_id, kind, url) values ($1, 'github', 'https://github.com/a/b')`, [t]),
+        /showcase only/i, 'source link on an Inspo template');
+
+  const [m] = ok(await as(db, maker, `select public.prepare_media_upload($1, 'image/webp', 100000) as path`, [t]));
+  ok(await as(db, maker, `select public.register_media($1, $2, 'cover', 'desktop', 'Portfolio home page', 1600, 1000)`, [t, m.path]));
+  ok(await as(db, maker, `update public.templates set demo_url = 'https://maker.vercel.app', tagline = 'My personal portfolio',
+      description = 'A portfolio site I designed and built, shared for inspiration.' where id = $1`, [t]));
+  const [tag] = await sql(`select id from public.tags where slug = 'minimal'`);
+  ok(await as(db, maker, `select public.set_template_tags($1, array[$2]::int[])`, [t, tag.id]));
+
+  ok(await as(db, maker, `update public.template_versions set license_code = 'MIT' where id = $1`, [v]));
+  fails(await as(db, maker, `select public.publish_version($1, true)`, [v]), /Showcase only/, 'Inspo with a download license');
+  ok(await as(db, maker, `update public.template_versions set license_code = 'SHOWCASE' where id = $1`, [v]));
+  assert.equal(ok(await as(db, maker, `select public.publish_version($1, true) as s`, [v]))[0].s, 'published');
+  const [card] = ok(await as(db, null, `select category_kind, license_code from public.template_cards where id = $1`, [t]));
+  assert.deepEqual([card.category_kind, card.license_code], ['inspo', 'SHOWCASE']);
+  ok(await as(db, voter, `select * from public.cast_vote($1)`, [t]));
+
+  // A normal template can't borrow the showcase license, and one with files can't move into Inspo.
+  const [row2] = ok(await as(db, u.alice, `select * from public.create_template('Not Inspo', $1::smallint)`, [s.websites]));
+  ok(await as(db, u.alice, `insert into public.template_links (template_id, kind, url) values ($1, 'github', 'https://github.com/a/b')`, [row2.template_id]));
+  fails(await as(db, u.alice, `update public.templates set category_id = $2 where id = $1`, [row2.template_id, inspo.id]), /before moving this to Inspo/);
+});
+
+test('post edits: author only, same rules as a new post, marked as edited', async () => {
+  const author = await createUser(db, { email: 'editor@test.dev' });
+  const other = await createUser(db, { email: 'not-editor@test.dev' });
+  const [{ id }] = ok(await as(db, author, `select public.create_post('First draft of a thought', '{}') as id`));
+  const upd = (uid, body, tags = []) => as(db, uid, `select public.update_post($1, $2, $3::text[])`, [id, body, tags]);
+  fails(await upd(other, 'hijacked'), /Post not found/, 'edit someone else\'s post');
+  fails(await upd(null, 'anon'), /permission denied|Sign in|Not signed in/i, 'anon edits');
+  fails(await upd(author, '   '), /Write something/);
+  fails(await upd(author, 'x'.repeat(1501)), /1,500/);
+  fails(await upd(author, 'ok', ['bad tag!']), /Tags are/);
+  ok(await upd(author, 'Second, better draft', ['#Ideas', 'ideas', 'design']));
+  const [card] = ok(await as(db, null, `select body, tags, edited_at from public.post_cards where id = $1`, [id]));
+  assert.equal(card.body, 'Second, better draft');
+  assert.deepEqual(card.tags, ['ideas', 'design']);
+  assert.ok(card.edited_at, 'marked as edited');
+  ok(await as(db, author, `select public.delete_post($1)`, [id]));
+  fails(await upd(author, 'after delete'), /Post not found/, 'edit a deleted post');
+});
+
 test('reports are private to the reporter and moderators', async () => {
   ok(await as(db, u.bob, `insert into public.reports (target_type, target_id, reason) values ('template', $1, 'broken')`, [s.tpl]));
   none(await as(db, u.alice, `select id from public.reports`));
@@ -578,6 +699,14 @@ test('URLs: valid ones are accepted, dangerous or off-allowlist ones refused', a
   fails(await setDemo('javascript:alert(1)'), /check constraint/);
   fails(await setDemo('http://insecure.example.com'), /check constraint/);
   fails(await setDemo('https://' + 'a'.repeat(600)), /check constraint/);
+  // Live demos must be the creator's own site, not a big platform or a link shortener.
+  for (const bad of ['https://www.google.com', 'https://google.co.uk/search?q=x', 'https://m.facebook.com/page',
+                     'https://youtu.be/abc', 'https://www.youtube.com/watch?v=1', 'https://bit.ly/x', 'https://x.com/someone', 'https://GOOGLE.COM']) {
+    fails(await setDemo(bad), /live demo/, bad);
+  }
+  for (const good of ['https://me.vercel.app', 'https://myname.github.io/site', 'https://notgoogle.com', 'https://google.example.com']) {
+    ok(await setDemo(good), good);
+  }
   const addLink = (kind, url) => as(db, u.alice,
     `insert into public.template_links (template_id, kind, url) values ($1, $2, $3)`, [d.template_id, kind, url]);
   ok(await addLink('figma', 'https://www.figma.com/community/file/123/name'));

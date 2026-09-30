@@ -1,6 +1,6 @@
 export type TemplateStatus = 'draft' | 'pending_review' | 'published' | 'unlisted' | 'removed';
 export type ScanStatus = 'pending' | 'scanning' | 'clean' | 'infected' | 'rejected';
-export type CategoryKind = 'web' | 'mobile' | 'kit' | 'component' | 'other' | 'concept';
+export type CategoryKind = 'web' | 'mobile' | 'kit' | 'component' | 'other' | 'concept' | 'inspo';
 export type Tool =
   | 'code' | 'figma' | 'psd' | 'canva' | 'sketch' | 'xd' | 'ai' | 'penpot' | 'pdf'
   | 'github' | 'framer' | 'webflow';

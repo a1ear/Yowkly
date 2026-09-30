@@ -12,11 +12,13 @@ export async function GET() {
   const { data } = await db.auth.getClaims();
   const uid = data?.claims?.sub;
   if (!uid) return NextResponse.json({ me: null }, { headers });
-  const [{ data: p }, { count }, { data: w }] = await Promise.all([
+  const [{ data: p }, { count }, { data: w }, { data: role }] = await Promise.all([
     db.from('profiles').select('id, username, display_name, avatar_path').eq('id', uid).maybeSingle(),
     db.from('notifications').select('id', { count: 'exact', head: true }).is('read_at', null),
     db.from('yowkbit_wallets').select('balance').eq('user_id', uid).maybeSingle(),
+    db.rpc('my_staff_role'),
   ]);
-  const me = p ? { ...p, unread: count ?? 0, balance: (w as { balance: number } | null)?.balance ?? 0 } : null;
+  // role only decides whether the header shows the admin panel link; every admin page and action checks again.
+  const me = p ? { ...p, unread: count ?? 0, balance: (w as { balance: number } | null)?.balance ?? 0, role: (role as string | null) ?? null } : null;
   return NextResponse.json({ me }, { headers });
 }

@@ -36,7 +36,11 @@ const csp = [
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   async redirects() {
-    return [{ source: '/awards', destination: '/ranking', permanent: true }];
+    return [
+      { source: '/awards', destination: '/ranking', permanent: true },
+      // Notifications are a popup on the bell now, not a page.
+      { source: '/notifications', destination: '/', permanent: false },
+    ];
   },
   async rewrites() {
     return [{ source: '/@:username', destination: '/u/:username' }];

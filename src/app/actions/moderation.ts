@@ -27,10 +27,12 @@ export async function resolveReport(reportId: string, status: 'resolved' | 'dism
   return { ok: true, data: null };
 }
 
-export async function markNotificationsRead(): Promise<ActionResult> {
+/** Admins only: make a follower a sub-admin (approve / request changes), or take it away. Re-checked by set_sub_admin. */
+export async function setSubAdmin(userId: string, on: boolean): Promise<ActionResult> {
+  if (!z.uuid().safeParse(userId).success || typeof on !== 'boolean') return fail('Invalid request.');
   const a = await authed('write');
   if ('error' in a) return a.error;
-  const { error } = await a.db.rpc('mark_notifications_read', { p_ids: null });
+  const { error } = await a.db.rpc('set_sub_admin', { p_user: userId, p_on: on });
   if (error) return fail(toUserError(error));
   return { ok: true, data: null };
 }

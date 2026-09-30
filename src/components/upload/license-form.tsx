@@ -5,21 +5,22 @@ import { saveLicense } from '@/app/actions/upload';
 import { Icon } from '../icons';
 import type { License } from '@/lib/types';
 
-export function LicenseForm({ templateId, versionId, licenses, initial, previous }: {
-  templateId: string; versionId: string; licenses: License[];
+export function LicenseForm({ templateId, versionId, licenses: all, initial, previous, inspo = false }: {
+  templateId: string; versionId: string; licenses: License[]; inspo?: boolean;
   initial: { license: string | null; version: string; changelog: string | null }; previous: string | null;
 }) {
   const [state, action, pending] = useActionState(saveLicense.bind(null, templateId, versionId), null);
+  const licenses = all.filter((l) => (l.code === 'SHOWCASE') === inspo);
   return (
     <form action={action} className="flex flex-col gap-8">
       <fieldset className="m-0 flex flex-col gap-3 border-0 p-0">
         <legend className="mb-2 text-lg font-semibold">License</legend>
-        <p className="m-0 -mt-1 text-[13px] text-ink-2">This is what people are allowed to do with your work. It is saved with this version and can&apos;t be changed after publishing; a new version can use a different license.</p>
+        <p className="m-0 -mt-1 text-[13px] text-ink-2">{inspo ? 'Inspo is showcase only: nothing is downloaded, and all rights stay with you.' : <>This is what people are allowed to do with your work. It is saved with this version and can&apos;t be changed after publishing; a new version can use a different license.</>}</p>
         <div className="grid gap-3 sm:grid-cols-2">
           {licenses.map((l) => (
             <label key={l.code} className="flex cursor-pointer flex-col gap-2 rounded-xl bg-surface-1 p-4 shadow-[inset_0_0_0_1px_var(--line)] has-[:checked]:shadow-[inset_0_0_0_2px_var(--accent)] has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-accent">
               <span className="flex items-center gap-2.5">
-                <input type="radio" name="license" value={l.code} required defaultChecked={initial.license === l.code} className="h-4 w-4 accent-[var(--accent)]" />
+                <input type="radio" name="license" value={l.code} required defaultChecked={initial.license === l.code || inspo} className="h-4 w-4 accent-[var(--accent)]" />
                 <span className="font-semibold">{l.name}</span>
               </span>
               <span className="text-[13px] text-ink-2">{l.summary}</span>

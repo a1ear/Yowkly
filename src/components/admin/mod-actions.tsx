@@ -5,7 +5,7 @@ import { moderateTemplate, resolveReport } from '@/app/actions/moderation';
 import { deletePost, removePostComment } from '@/app/actions/posts';
 import { useToast } from '../toast';
 
-export function TemplateModActions({ id, status }: { id: string; status: string }) {
+export function TemplateModActions({ id, status, canRemove = true }: { id: string; status: string; canRemove?: boolean }) {
   const router = useRouter();
   const toast = useToast();
   const [reason, setReason] = useState('');
@@ -20,14 +20,14 @@ export function TemplateModActions({ id, status }: { id: string; status: string 
   return (
     <div className="flex flex-col gap-2">
       <label className="sr-only" htmlFor={`reason-${id}`}>Reason (required to reject or remove)</label>
-      <input id={`reason-${id}`} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={1000} className="field h-9" placeholder="Reason (required to reject or remove)" />
+      <input id={`reason-${id}`} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={1000} className="field h-9" placeholder={canRemove ? 'Reason (required to reject or remove)' : 'What should the creator change? (required to request changes)'} />
       <div className="flex flex-wrap gap-2">
         {status === 'pending_review' && <>
           <button type="button" disabled={pending} onClick={() => run('approve')} className="btn btn-primary h-9 px-3">Approve</button>
           <button type="button" disabled={pending || reason.trim().length < 3} onClick={() => run('reject')} className="btn btn-secondary h-9 px-3">Request changes</button>
         </>}
-        {status !== 'removed' && <button type="button" disabled={pending || reason.trim().length < 3} onClick={() => run('remove')} className="btn btn-danger h-9 px-3">Remove</button>}
-        {status === 'removed' && <button type="button" disabled={pending} onClick={() => run('restore')} className="btn btn-secondary h-9 px-3">Restore</button>}
+        {canRemove && status !== 'removed' && <button type="button" disabled={pending || reason.trim().length < 3} onClick={() => run('remove')} className="btn btn-danger h-9 px-3">Remove</button>}
+        {canRemove && status === 'removed' && <button type="button" disabled={pending} onClick={() => run('restore')} className="btn btn-secondary h-9 px-3">Restore</button>}
       </div>
     </div>
   );

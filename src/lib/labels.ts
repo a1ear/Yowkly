@@ -8,7 +8,7 @@ export const TOOL_LABEL: Record<Tool, string> = {
 };
 
 export const LICENSE_SHORT: Record<string, string> = {
-  MIT: 'MIT', 'CC-BY-4.0': 'CC BY 4.0', 'CC-BY-NC-4.0': 'CC BY-NC', PERSONAL: 'Personal use',
+  MIT: 'MIT', 'CC-BY-4.0': 'CC BY 4.0', 'CC-BY-NC-4.0': 'CC BY-NC', PERSONAL: 'Personal use', SHOWCASE: 'Inspo',
 };
 
 /** Tools deduplicated for display (a Figma file and a Figma link show once). */

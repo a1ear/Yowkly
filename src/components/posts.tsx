@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState, useTransition } from 'react';
-import { addPostComment, commentReactionStates, createPost, deletePost, loadPostComments, postReactionStates, removePostComment, setCommentReaction, setPostReaction } from '@/app/actions/posts';
+import { addPostComment, commentReactionStates, createPost, deletePost, updatePost, loadPostComments, postReactionStates, removePostComment, setCommentReaction, setPostReaction } from '@/app/actions/posts';
 import { Avatar } from './bits';
 import { Dialog } from './dialog';
 import { Icon } from './icons';
@@ -175,11 +175,25 @@ function PostItem({ post, me, reaction, counts, onReact, onDeleted }: {
   const [pending, start] = useTransition();
   const [confirming, setConfirming] = useState(false);
   const [reporting, setReporting] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [content, setContent] = useState({ body: post.body, tags: post.tags, edited: Boolean(post.edited_at) });
+  const menuRef = useRef<HTMLDivElement>(null);
   const [showComments, setShowComments] = useState(false);
   const [commentCount, setCommentCount] = useState(post.comment_count);
   const [live, setLive] = useState<PostComment[] | null>(null);
   const previews = live ? bestTwo(live) : post.previews;
   const own = me === post.author_id;
+
+  // Close the ⋮ menu on Escape or a click outside it.
+  useEffect(() => {
+    if (!menu) return;
+    const onDown = (e: MouseEvent) => { if (!menuRef.current?.contains(e.target as Node)) setMenu(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenu(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [menu]);
 
   const remove = () => start(async () => {
     const r = await deletePost(post.id);
@@ -194,19 +208,56 @@ function PostItem({ post, me, reaction, counts, onReact, onDeleted }: {
         <Link href={`/@${post.author_username}`} aria-label={`${post.author_display_name}'s profile`}>
           <Avatar name={post.author_display_name} path={post.author_avatar_path} seed={post.author_username} size={40} />
         </Link>
-        <div className="flex min-w-0 flex-col leading-tight">
+        <div className="flex min-w-0 flex-1 flex-col leading-tight">
           <Link href={`/@${post.author_username}`} className="truncate font-semibold hover:text-accent-ink">{post.author_display_name}</Link>
-          <span className="truncate text-[13px] text-ink-3">@{post.author_username} · <time dateTime={post.created_at}>{timeAgo(post.created_at)}</time></span>
+          <span className="truncate text-[13px] text-ink-3">@{post.author_username} · <time dateTime={post.created_at}>{timeAgo(post.created_at)}</time>{content.edited && ' · Edited'}</span>
+        </div>
+        <div ref={menuRef} className="relative">
+          <button type="button" onClick={() => setMenu((v) => !v)} aria-label="Post options" aria-haspopup="menu" aria-expanded={menu}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink">
+            <Icon name="kebab" size={18} />
+          </button>
+          {menu && (
+            <div role="menu" className="absolute top-11 right-0 z-10 w-44 rounded-xl bg-surface-1 p-1.5 shadow-e2 ring-1 ring-line">
+              {own ? (
+                <>
+                  <button role="menuitem" type="button" onClick={() => { setMenu(false); setEditing(true); }}
+                          className="flex h-10 w-full items-center gap-2.5 rounded-md px-3 text-left text-sm hover:bg-surface-2">
+                    <Icon name="settings" size={16} />Edit post
+                  </button>
+                  <button role="menuitem" type="button" onClick={() => { setMenu(false); setConfirming(true); }}
+                          className="flex h-10 w-full items-center gap-2.5 rounded-md px-3 text-left text-sm text-danger hover:bg-surface-2">
+                    <Icon name="trash" size={16} />Delete post
+                  </button>
+                </>
+              ) : (
+                <button role="menuitem" type="button" onClick={() => { setMenu(false); if (me) setReporting(true); else toast({ text: 'Sign in to report a post.', tone: 'error' }); }}
+                        className="flex h-10 w-full items-center gap-2.5 rounded-md px-3 text-left text-sm hover:bg-surface-2">
+                  <Icon name="flag" size={16} />Report post
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </header>
+      {confirming && (
+        <div role="alertdialog" aria-label="Delete this post?" className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-surface-2 px-3 py-2 text-sm">
+          <span className="text-ink-2">Delete this post? This can&apos;t be undone.</span>
+          <span className="flex gap-1">
+            <button type="button" onClick={() => setConfirming(false)} className="btn btn-ghost h-9 px-3">Keep</button>
+            <button type="button" onClick={remove} disabled={pending} className="btn btn-danger h-9 px-3">Delete</button>
+          </span>
+        </div>
+      )}
+      {editing && <EditPost post={post} content={content} onClose={() => setEditing(false)} onSaved={(c) => { setContent({ ...c, edited: true }); setEditing(false); }} />}
 
       {/* Plain text only: React escapes it, and no links are made clickable. */}
-      <p className="m-0 text-[15.5px] leading-relaxed break-words whitespace-pre-line">{post.body}</p>
+      <p className="m-0 text-[15.5px] leading-relaxed break-words whitespace-pre-line">{content.body}</p>
 
-      {post.tags.length > 0 && (
-        <ul className="m-0 flex list-none flex-wrap gap-1.5 p-0" aria-label="Tags">
-          {post.tags.map((t) => (
-            <li key={t}><Link href={`/community?tag=${t}`} className="chip-stack hover:text-accent-ink">#{t}</Link></li>
+      {content.tags.length > 0 && (
+        <ul className="m-0 flex list-none flex-wrap gap-x-3 gap-y-1 p-0 text-[13px]" aria-label="Tags">
+          {content.tags.map((t) => (
+            <li key={t}><Link href={`/community?tag=${t}`} className="text-ink-3 hover:text-accent-ink">{t}</Link></li>
           ))}
         </ul>
       )}
@@ -220,25 +271,6 @@ function PostItem({ post, me, reaction, counts, onReact, onDeleted }: {
           <Icon name="comment" size={18} />
           <span className="font-mono">{formatCompact(commentCount)}</span>
         </button>
-        <span className="flex-1" />
-        {own ? (
-          confirming ? (
-            <span className="flex items-center gap-1 text-sm">
-              <span className="text-ink-2">Delete this post?</span>
-              <button type="button" onClick={remove} disabled={pending} className="btn btn-danger h-9 px-3">Delete</button>
-              <button type="button" onClick={() => setConfirming(false)} className="btn btn-ghost h-9 px-3">Keep</button>
-            </span>
-          ) : (
-            <button type="button" onClick={() => setConfirming(true)} className="inline-flex h-11 items-center gap-2 rounded-md px-3 text-sm text-ink-3 hover:bg-surface-2 hover:text-danger">
-              <Icon name="trash" size={16} />Delete
-            </button>
-          )
-        ) : (
-          <button type="button" onClick={() => (me ? setReporting(true) : toast({ text: 'Sign in to report a post.', tone: 'error' }))}
-                  className="inline-flex h-11 items-center gap-2 rounded-md px-3 text-sm text-ink-3 hover:bg-surface-2 hover:text-ink">
-            <Icon name="flag" size={16} />Report
-          </button>
-        )}
       </footer>
       {reporting && <ReportDialog targetType="post" targetId={post.id} onClose={() => setReporting(false)} />}
       {!showComments && previews.length > 0 && (
@@ -389,5 +421,48 @@ function PostComments({ postId, postAuthorId, me, onCount, onList }: {
       )}
       {reporting && <ReportDialog targetType="post_comment" targetId={reporting} onClose={() => setReporting(null)} />}
     </section>
+  );
+}
+
+/** The edit popup: same limits as a new post; the server and the database check them again. */
+function EditPost({ post, content, onClose, onSaved }: {
+  post: Post; content: { body: string; tags: string[] };
+  onClose: () => void; onSaved: (c: { body: string; tags: string[] }) => void;
+}) {
+  const toast = useToast();
+  const [body, setBody] = useState(content.body);
+  const [tags, setTags] = useState(content.tags.join(', '));
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const save = (e: React.FormEvent) => {
+    e.preventDefault();
+    start(async () => {
+      const r = await updatePost(post.id, body, tags);
+      if (!r.ok) return setError(r.error);
+      toast({ text: 'Post updated.', tone: 'ok' });
+      onSaved(r.data);
+    });
+  };
+  return (
+    <Dialog open onClose={onClose} title="Edit post" width={560}>
+      <form onSubmit={save} className="flex flex-col gap-3">
+        <label className="flex flex-col gap-1">
+          <span className="sr-only">Your post</span>
+          <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={5} maxLength={MAX} required autoFocus className="field h-auto resize-y py-2.5" />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="sr-only">Tags</span>
+          <input value={tags} onChange={(e) => setTags(e.target.value)} maxLength={200} autoComplete="off" placeholder="Tags: react, design (up to 5)" className="field" />
+        </label>
+        {error && <p role="alert" className="m-0 flex items-center gap-2 text-danger"><Icon name="alert" size={16} />{error}</p>}
+        <div className="flex items-center justify-between gap-3">
+          <span className={`font-mono text-xs ${body.length > MAX - 100 ? 'text-danger' : 'text-ink-3'}`}>{body.length}/{MAX}</span>
+          <span className="flex gap-2">
+            <button type="button" onClick={onClose} className="btn btn-ghost">Cancel</button>
+            <button className="btn btn-primary" disabled={pending || !body.trim()}>{pending ? 'Saving…' : 'Save changes'}</button>
+          </span>
+        </div>
+      </form>
+    </Dialog>
   );
 }

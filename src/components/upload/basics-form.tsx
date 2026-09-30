@@ -22,19 +22,21 @@ export function BasicsForm({ templateId, initial, categories, tags }: {
   const [query, setQuery] = useState('');
   const suggestions = tags.filter((t) => !picked.includes(t.id) && t.name.toLowerCase().includes(query.toLowerCase())).slice(0, 8);
 
+  const req = <span className="text-danger" aria-hidden="true"> *</span>;
   return (
     <form action={action} className="flex flex-col gap-6">
+      <p className="m-0 -mt-4 text-[13px] text-ink-3">Fields marked <span className="text-danger">*</span> are required.</p>
       <label className="flex flex-col gap-1.5">
-        <span className="flex justify-between"><span className="label">Title</span><span className="font-mono text-[11px] text-ink-3">{title.length} / 80</span></span>
+        <span className="flex justify-between"><span className="label">Title{req}</span><span className="font-mono text-[11px] text-ink-3">{title.length} / 80</span></span>
         <input name="title" required minLength={3} maxLength={80} value={title} onChange={(e) => setTitle(e.target.value)} className="field" placeholder="Nocturne — SaaS Dashboard Kit" />
       </label>
       <label className="flex flex-col gap-1.5">
-        <span className="label">Tagline</span>
-        <input name="tagline" maxLength={140} defaultValue={initial.tagline} className="field" placeholder="One sentence that sells it" />
+        <span className="label">Tagline{req}</span>
+        <input name="tagline" required minLength={10} maxLength={140} defaultValue={initial.tagline} className="field" placeholder="One sentence that sells it" />
       </label>
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="flex flex-col gap-1.5">
-          <span className="label">Category</span>
+          <span className="label">Category{req}</span>
           <select name="category" required value={top} onChange={(e) => setTop(e.target.value ? Number(e.target.value) : '')} className="field">
             <option value="">Choose…</option>
             {categories.filter((c) => !c.parent_id).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -50,7 +52,7 @@ export function BasicsForm({ templateId, initial, categories, tags }: {
       </div>
 
       <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
-        <legend className="label mb-1.5">Tags <span className="font-normal text-ink-3">({picked.length}/10: stack, tools, style)</span></legend>
+        <legend className="label mb-1.5">Tags{req} <span className="font-normal text-ink-3">(at least 1, up to 10: stack, tools, style)</span></legend>
         {picked.map((id) => <input key={id} type="hidden" name="tag" value={id} />)}
         <div className="flex flex-wrap gap-2">
           {picked.map((id) => {
@@ -79,8 +81,8 @@ export function BasicsForm({ templateId, initial, categories, tags }: {
       </fieldset>
 
       <label className="flex flex-col gap-1.5">
-        <span className="label">Description</span>
-        <textarea name="description" rows={8} maxLength={10000} defaultValue={initial.description} className="field h-auto resize-y py-2.5"
+        <span className="label">Description{req}</span>
+        <textarea name="description" required minLength={30} rows={8} maxLength={10000} defaultValue={initial.description} className="field h-auto resize-y py-2.5"
                   placeholder={'What’s included, who it’s for, how to use it.\n\n- Use "- " for bullet points\n- **bold** for emphasis'} />
         <span className="text-[12px] text-ink-3">Plain text with simple formatting: “- ” lists, ## headings, **bold**, `code`.</span>
       </label>

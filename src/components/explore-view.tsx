@@ -4,7 +4,7 @@ import { CreatorResults } from './creator-results';
 import { TemplateCard } from './template-card';
 import { EmptyState } from './bits';
 import { Icon } from './icons';
-import { AutoSubmit } from './auto-submit';
+import { ExploreFilters, type FilterGroup } from './explore-filters';
 import { formatCount } from '@/lib/format';
 import { TOOL_LABEL } from '@/lib/labels';
 import type { Tool } from '@/lib/types';
@@ -34,6 +34,16 @@ export async function ExploreView({ params, base, title, description }: {
   const top = categories.filter((c) => !c.parent_id);
   const stacks = tags.filter((t) => t.type === 'stack');
   const styles = tags.filter((t) => t.type === 'style');
+  const industries = tags.filter((t) => t.type === 'industry');
+  const designTools = tags.filter((t) => t.type === 'tool');
+  const groups: FilterGroup[] = [
+    ...(base === '/explore' ? [{ key: 'category' as const, legend: 'Category', single: true, options: top.map((c) => [c.slug, c.name] as [string, string]) }] : []),
+    { key: 'tag', legend: 'Tech stack', options: stacks.map((t) => [t.slug, t.name]) },
+    { key: 'tool', legend: 'Source tool', options: TOOLS.map((t) => [t, TOOL_LABEL[t]]) },
+    { key: 'tag', legend: 'Style', options: styles.map((t) => [t.slug, t.name]) },
+    { key: 'tag', legend: 'Made with', moreOnly: true, options: designTools.map((t) => [t.slug, t.name]) },
+    { key: 'tag', legend: 'Industry', moreOnly: true, options: industries.map((t) => [t.slug, t.name]) },
+  ];
   const tagName = new Map(tags.map((t) => [t.slug, t.name]));
 
   const active: [string, string][] = [
@@ -56,40 +66,9 @@ export async function ExploreView({ params, base, title, description }: {
       </div>
 
       <div className="mt-8 grid gap-8 lg:grid-cols-[240px_1fr]">
-        <form action={base} method="get" aria-label="Filters" className="flex flex-col gap-6 max-lg:rounded-xl max-lg:bg-surface-1 max-lg:p-4 max-lg:shadow-[inset_0_0_0_1px_var(--line)]">
-          <AutoSubmit />
-          {params.q && <input type="hidden" name="q" value={params.q} />}
-          {params.sort !== 'trending' && <input type="hidden" name="sort" value={params.sort} />}
-          <details open className="group flex flex-col gap-6 lg:contents">
-            <summary className="flex h-11 cursor-pointer list-none items-center justify-between font-semibold lg:hidden">
-              <span className="inline-flex items-center gap-2"><Icon name="filter" size={16} />Filters{active.length ? ` (${active.length})` : ''}</span>
-              <Icon name="chevronDown" size={16} className="transition group-open:rotate-180" />
-            </summary>
-            {base === '/explore' && (
-              <fieldset className="m-0 flex flex-col gap-1 border-0 p-0">
-                <legend className="eyebrow mb-2">Category</legend>
-                <label className="flex min-h-9 items-center gap-2.5 text-ink-2"><input type="radio" name="category" value="" defaultChecked={!params.category} className="h-4 w-4 accent-[var(--accent)]" />All</label>
-                {top.map((c) => (
-                  <label key={c.slug} className="flex min-h-9 items-center gap-2.5 text-ink-2">
-                    <input type="radio" name="category" value={c.slug} defaultChecked={params.category === c.slug} className="h-4 w-4 accent-[var(--accent)]" />
-                    {c.name}
-                  </label>
-                ))}
-              </fieldset>
-            )}
-            <CheckGroup legend="Tech stack" name="tag" options={stacks.map((t) => [t.slug, t.name])} selected={params.tag} />
-            <CheckGroup legend="Source tool" name="tool" options={TOOLS.map((t) => [t, TOOL_LABEL[t]])} selected={params.tool} />
-            <fieldset className="m-0 flex flex-col gap-1 border-0 p-0">
-              <legend className="eyebrow mb-2">License</legend>
-              <label className="flex min-h-9 items-center gap-2.5 text-ink-2">
-                <input type="checkbox" name="commercial" value="1" defaultChecked={Boolean(params.commercial)} className="h-4 w-4 accent-[var(--accent)]" />
-                Commercial use allowed
-              </label>
-            </fieldset>
-            <CheckGroup legend="Style" name="tag" options={styles.map((t) => [t.slug, t.name])} selected={params.tag} />
-            <button type="submit" className="btn btn-secondary">Apply filters</button>
-          </details>
-        </form>
+        {/* Keyed on the applied filters so removing a chip or Clear all resets the picks too. */}
+        <ExploreFilters key={[params.category, params.tag.join(), params.tool.join(), params.commercial, params.q].join('|')} base={base} groups={groups} q={params.q} sort={params.sort}
+                        initial={{ category: params.category && base === '/explore' ? params.category : '', tag: params.tag, tool: params.tool, commercial: Boolean(params.commercial) }} />
 
         <div className="flex min-w-0 flex-col gap-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -142,19 +121,5 @@ export async function ExploreView({ params, base, title, description }: {
         </div>
       </div>
     </div>
-  );
-}
-
-function CheckGroup({ legend, name, options, selected }: { legend: string; name: string; options: [string, string][]; selected: string[] }) {
-  return (
-    <fieldset className="m-0 flex flex-col gap-1 border-0 p-0">
-      <legend className="eyebrow mb-2">{legend}</legend>
-      {options.map(([value, label]) => (
-        <label key={value} className="flex min-h-9 items-center gap-2.5 text-ink-2">
-          <input type="checkbox" name={name} value={value} defaultChecked={selected.includes(value)} className="h-4 w-4 accent-[var(--accent)]" />
-          {label}
-        </label>
-      ))}
-    </fieldset>
   );
 }

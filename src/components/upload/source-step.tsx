@@ -28,9 +28,11 @@ const LINK_FIELDS: [LinkKind, string, string][] = [
   ['penpot', 'Penpot', 'https://design.penpot.app/…'],
 ];
 
-export function SourceStep({ templateId, versionId, files, links, demoUrl }: {
+export function SourceStep({ templateId, versionId, files, links, demoUrl, inspo = false }: {
   templateId: string; versionId: string; files: DraftFile[];
   links: { kind: LinkKind; url: string }[]; demoUrl: string | null;
+  /** Inspo is showcase only: no files, no source links, just where to see it live. */
+  inspo?: boolean;
 }) {
   const toast = useToast();
   const [rows, setRows] = useState<Row[]>(files.map((file) => ({ kind: 'saved', file })));
@@ -106,7 +108,12 @@ export function SourceStep({ templateId, versionId, files, links, demoUrl }: {
 
   return (
     <div className="flex flex-col gap-10">
-      <section aria-labelledby="files-title" className="flex flex-col gap-4">
+      {inspo && (
+        <p className="m-0 rounded-xl bg-surface-1 p-4 text-[14px] text-ink-2 shadow-[inset_0_0_0_1px_var(--line)]">
+          <strong className="text-ink">Inspo is a showcase.</strong> People look at it and vote for it, but there&apos;s nothing to download, so there are no files or source links here. Add the address of the live site if there is one; your screenshots come next.
+        </p>
+      )}
+      {!inspo && <section aria-labelledby="files-title" className="flex flex-col gap-4">
         <div>
           <h2 id="files-title" className="m-0 text-lg font-semibold">Upload files</h2>
           <p className="m-0 text-[13px] text-ink-2">ZIP, Figma, PSD, AI, Sketch, XD, Penpot or PDF. Every file is scanned for malware before anyone can download it.</p>
@@ -153,26 +160,27 @@ export function SourceStep({ templateId, versionId, files, links, demoUrl }: {
             })}
           </ul>
         )}
-      </section>
+      </section>}
 
       <form action={linkAction} className="flex flex-col gap-6">
         <section aria-labelledby="links-title" className="flex flex-col gap-4">
           <div>
-            <h2 id="links-title" className="m-0 text-lg font-semibold">Links</h2>
-            <p className="m-0 text-[13px] text-ink-2">Canva has no editable file export, so Canva templates are shared as a link. Figma and GitHub links work alongside or instead of files.</p>
+            <h2 id="links-title" className="m-0 text-lg font-semibold">{inspo ? 'Live site' : 'Links'}</h2>
+            {!inspo && <p className="m-0 text-[13px] text-ink-2">Canva has no editable file export, so Canva templates are shared as a link. Figma and GitHub links work alongside or instead of files.</p>}
           </div>
           <label className="flex flex-col gap-1.5">
-            <span className="label">Live demo URL <span className="font-normal text-ink-3">(optional, shown in a sandboxed preview)</span></span>
+            <span className="label">{inspo ? 'Website URL' : 'Live demo URL'} <span className="font-normal text-ink-3">(optional, shown in a sandboxed preview)</span></span>
+            <span className="text-[12px] text-ink-3">Must be your own site, like yourname.vercel.app, netlify.app or github.io. Google, Facebook, YouTube, other social sites and link shorteners aren&apos;t allowed.</span>
             <input name="demo" type="url" inputMode="url" defaultValue={demoUrl ?? ''} placeholder="https://your-demo.example.com" className="field" />
           </label>
-          <div className="grid gap-4 sm:grid-cols-2">
+          {!inspo && <div className="grid gap-4 sm:grid-cols-2">
             {LINK_FIELDS.map(([k, label, ph]) => (
               <label key={k} className="flex flex-col gap-1.5">
                 <span className="label">{label}</span>
                 <input name={`link_${k}`} type="url" inputMode="url" defaultValue={linkValue(k)} placeholder={ph} className="field" />
               </label>
             ))}
-          </div>
+          </div>}
         </section>
         {linkState?.error && <p role="alert" className="m-0 flex items-center gap-2 text-danger"><Icon name="alert" size={16} />{linkState.error}</p>}
         <div className="sticky bottom-16 flex flex-wrap items-center justify-between gap-3 border-t border-line bg-canvas/95 py-4 md:bottom-0">

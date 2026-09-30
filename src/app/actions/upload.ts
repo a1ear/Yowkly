@@ -8,6 +8,7 @@ import { deleteObjects, presignUpload } from '@/lib/r2';
 import { triggerScan } from '@/lib/scan-trigger';
 import { templateTag } from '@/lib/data/template';
 import { publicEnv } from '@/lib/env';
+import { isBlockedDemoHost } from '@/lib/demo-url';
 
 /**
  * After the creator edits a template (details, links, images), their next page
@@ -25,10 +26,10 @@ const uuid = z.uuid();
 // ── Step 1: basics ────────────────────────────────────────────────────
 const basics = z.object({
   title: z.string().trim().min(3, 'Titles need at least 3 characters.').max(80, 'Keep the title under 80 characters.'),
-  tagline: z.string().trim().max(140, 'Keep the tagline under 140 characters.'),
-  description: z.string().trim().max(10000, 'The description is too long (10,000 characters max).'),
-  categoryId: z.coerce.number().int().positive('Choose a category.'),
-  tagIds: z.array(z.coerce.number().int().positive()).max(10, 'Use at most 10 tags.'),
+  tagline: z.string().trim().min(10, 'Add a tagline (at least 10 characters).').max(140, 'Keep the tagline under 140 characters.'),
+  description: z.string().trim().min(30, 'Add a description (at least 30 characters): what it is and who it is for.').max(10000, 'The description is too long (10,000 characters max).'),
+  categoryId: z.coerce.number({ error: 'Choose a category.' }).int().positive('Choose a category.'),
+  tagIds: z.array(z.coerce.number().int().positive()).min(1, 'Add at least one tag.').max(10, 'Use at most 10 tags.'),
 });
 
 export async function saveBasics(templateId: string | null, _: WizardState, form: FormData): Promise<WizardState> {
@@ -70,22 +71,30 @@ const LINK_HOSTS: Record<string, RegExp> = {
   penpot: /^https:\/\/design\.penpot\.app\/\S+$/,
 };
 
-/** Demo URLs are framed on our pages, so they must never point back at us or at Supabase. */
-function demoAllowed(url: string) {
-  try {
-    const u = new URL(url);
-    const own = [new URL(publicEnv.NEXT_PUBLIC_SITE_URL).hostname, new URL(publicEnv.NEXT_PUBLIC_SUPABASE_URL).hostname];
-    const privateHost = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.0\.0\.0|\[?::1\]?)/.test(u.hostname);
-    return u.protocol === 'https:' && !u.username && !own.includes(u.hostname) && !privateHost && url.length <= 500;
-  } catch {
-    return false;
+/**
+ * Demo URLs are framed on our pages, so they must be the creator's own public site:
+ * never us or Supabase, never a private address, never a big platform or a link
+ * shortener (lib/demo-url.ts). Returns the problem, or null when it's fine.
+ */
+function demoProblem(url: string): string | null {
+  let u: URL;
+  try { u = new URL(url); } catch { return 'The demo URL must be a public https:// address.'; }
+  const own = [new URL(publicEnv.NEXT_PUBLIC_SITE_URL).hostname, new URL(publicEnv.NEXT_PUBLIC_SUPABASE_URL).hostname];
+  const privateHost = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.0\.0\.0|\[?::1\]?)/.test(u.hostname);
+  if (u.protocol !== 'https:' || u.username || own.includes(u.hostname) || privateHost || url.length > 500) {
+    return 'The demo URL must be a public https:// address.';
   }
+  if (isBlockedDemoHost(u.hostname)) {
+    return `${u.hostname} can't be used as a live demo. Link to your own site (for example yourname.vercel.app, netlify.app or github.io).`;
+  }
+  return null;
 }
 
 export async function saveLinks(templateId: string, _: WizardState, form: FormData): Promise<WizardState> {
   if (!uuid.safeParse(templateId).success) return { error: 'Invalid template.' };
   const demo = String(form.get('demo') ?? '').trim();
-  if (demo && !demoAllowed(demo)) return { error: 'The demo URL must be a public https:// address.' };
+  const problem = demo ? demoProblem(demo) : null;
+  if (problem) return { error: problem };
   const links: { kind: string; url: string }[] = [];
   for (const kind of Object.keys(LINK_HOSTS)) {
     const url = String(form.get(`link_${kind}`) ?? '').trim();
@@ -214,7 +223,8 @@ export async function removeMedia(mediaId: string): Promise<ActionResult> {
 // ── Step 4: license and version ───────────────────────────────────────
 export async function saveLicense(templateId: string, versionId: string, _: WizardState, form: FormData): Promise<WizardState> {
   const parsed = z.object({
-    license: z.enum(['MIT', 'CC-BY-4.0', 'CC-BY-NC-4.0', 'PERSONAL'], { message: 'Choose a license.' }),
+    // SHOWCASE is Inspo's license (the database checks it matches the category).
+    license: z.enum(['MIT', 'CC-BY-4.0', 'CC-BY-NC-4.0', 'PERSONAL', 'SHOWCASE'], { message: 'Choose a license.' }),
     version: z.string().trim().regex(/^(0|[1-9]\d{0,3})\.(0|[1-9]\d{0,3})\.(0|[1-9]\d{0,3})$/, 'Use semantic versioning, e.g. 1.2.0'),
     changelog: z.string().trim().max(5000),
   }).safeParse({ license: form.get('license'), version: form.get('version'), changelog: form.get('changelog') ?? '' });

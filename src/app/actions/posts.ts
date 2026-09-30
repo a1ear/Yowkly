@@ -27,6 +27,19 @@ export async function createPost(_: FormState, form: FormData): Promise<FormStat
   return { ok: true };
 }
 
+/** Authors edit their own posts; update_post re-checks ownership and the same rules as a new post. */
+export async function updatePost(postId: string, body: string, tags: string): Promise<ActionResult<{ body: string; tags: string[] }>> {
+  const parsed = z.object({ id: uuid, body: z.string().max(5000), tags: z.string().max(500) }).safeParse({ id: postId, body, tags });
+  if (!parsed.success) return fail('That post is too long.');
+  const a = await authed('post');
+  if ('error' in a) return a.error;
+  const { error } = await a.db.rpc('update_post', { p_post: postId, p_body: parsed.data.body, p_tags: parsed.data.tags.split(/[\s,]+/).filter(Boolean) });
+  if (error) return fail(toUserError(error));
+  const { data } = await a.db.from('posts').select('body, tags').eq('id', postId).single();
+  updateTag(POSTS_TAG);
+  return data ? { ok: true, data: data as { body: string; tags: string[] } } : fail('Saved. Reload to see it.');
+}
+
 /** Authors remove their own posts; moderators need a reason (both enforced by delete_post). */
 export async function deletePost(postId: string, reason?: string): Promise<ActionResult> {
   if (!uuid.safeParse(postId).success) return fail('Invalid post.');
