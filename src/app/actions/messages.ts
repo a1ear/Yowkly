@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { authed, fail, toUserError, type ActionResult } from '@/lib/actions';
 import { userClient } from '@/lib/supabase/clients';
 import { presignView } from '@/lib/r2';
-import { getCardsBySlugs } from '@/lib/data/public';
+import { getCardsBySlugs, searchCreators } from '@/lib/data/public';
 import type { TemplateCard } from '@/lib/types';
 
 const uuid = z.uuid();
@@ -131,4 +131,25 @@ export async function chatTemplateCards(slugs: string[]): Promise<TemplateCard[]
   const list = z.array(z.string().regex(/^[a-z0-9-]{1,90}$/)).max(10).safeParse(slugs);
   if (!list.success || !list.data.length) return [];
   return getCardsBySlugs(list.data);
+}
+
+export type PersonResult = { id: string; username: string; display_name: string; avatar_path: string | null; is_friend: boolean };
+
+/** People to start a chat with, by username or name. Your friends come first; you're left out. */
+export async function searchPeople(q: string): Promise<PersonResult[]> {
+  const term = typeof q === 'string' ? q.trim().slice(0, 60) : '';
+  if (term.replace(/^@/, '').length < 2) return [];
+  const db = await userClient();
+  const { data: c } = await db.auth.getClaims();
+  const me = c?.claims?.sub as string | undefined;
+  if (!me) return [];
+  const [people, { data: friends }] = await Promise.all([
+    searchCreators(term, 12),
+    db.rpc('my_friends'),
+  ]);
+  const friendIds = new Set(((friends ?? []) as { id: string }[]).map((f) => f.id));
+  return people.filter((p) => p.id !== me)
+    .map((p) => ({ id: p.id, username: p.username, display_name: p.display_name, avatar_path: p.avatar_path, is_friend: friendIds.has(p.id) }))
+    .sort((a, b) => Number(b.is_friend) - Number(a.is_friend))
+    .slice(0, 8);
 }

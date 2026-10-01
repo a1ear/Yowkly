@@ -6,7 +6,8 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import { browserClient } from '@/lib/supabase/browser';
 import {
   chatTemplateCards, isBlocked, listConversations, loadMessage, loadMessages, markConversationRead,
-  respondToRequest, sendMessage, setBlocked, unsendMessage, type ChatMessage, type Conversation,
+  openConversation, respondToRequest, searchPeople, sendMessage, setBlocked, unsendMessage,
+  type ChatMessage, type Conversation, type PersonResult,
 } from '@/app/actions/messages';
 import { shrinkImage } from '@/lib/image-shrink';
 import { timeAgo } from '@/lib/format';
@@ -33,6 +34,22 @@ export function Messenger({ me, initial }: { me: string; initial: string | null 
   const [list, setList] = useState<Conversation[] | null>(null);
   const [tab, setTab] = useState<'chats' | 'requests'>('chats');
   const [openId, setOpenId] = useState<string | null>(initial);
+  const toast = useToast();
+  const [query, setQuery] = useState('');
+  const [people, setPeople] = useState<PersonResult[] | null>(null);
+  const searchSeq = useRef(0);
+
+  const onSearch = (v: string) => {
+    setQuery(v);
+    const seq = ++searchSeq.current;
+    if (v.trim().replace(/^@/, '').length < 2) { setPeople(null); return; }
+    // Small debounce; a newer keystroke wins.
+    setTimeout(async () => {
+      if (seq !== searchSeq.current) return;
+      const found = await searchPeople(v);
+      if (seq === searchSeq.current) setPeople(found);
+    }, 250);
+  };
   const openRef = useRef(openId);
   useEffect(() => { openRef.current = openId; }, [openId]);
   // The open conversation registers here; Realtime events call straight into it.
@@ -82,13 +99,35 @@ export function Messenger({ me, initial }: { me: string; initial: string | null 
   const chats = (list ?? []).filter((c) => !c.incoming_request);
   const requests = (list ?? []).filter((c) => c.incoming_request);
   const current = (list ?? []).find((c) => c.id === openId) ?? null;
-  const shown = tab === 'chats' ? chats : requests;
+  // Search: filters your chats by name, and finds anyone to start a new chat with.
+  const q = query.trim().toLowerCase().replace(/^@/, '');
+  const shown = (tab === 'chats' ? chats : requests)
+    .filter((c) => !q || c.other_display_name.toLowerCase().includes(q) || c.other_username.toLowerCase().includes(q));
+  const newPeople = (people ?? []).filter((p) => !(list ?? []).some((c) => c.other_id === p.id && c.last_message_at));
+
+  const startWith = async (p: PersonResult) => {
+    const r = await openConversation(p.id);
+    if (!r.ok) return toast({ text: r.error, tone: 'error' });
+    setQuery('');
+    setPeople(null);
+    setTab('chats');
+    await refresh();
+    open(r.data.id);
+  };
 
   return (
     <div className="mx-auto grid h-[calc(100dvh-72px)] max-w-[1200px] md:grid-cols-[340px_1fr] md:gap-4 md:px-6 md:py-5 max-md:h-[calc(100dvh-56px-64px)]">
       <aside aria-label="Conversations" className={`${openId ? 'max-md:hidden' : ''} flex min-h-0 flex-col overflow-hidden bg-surface-1 md:rounded-2xl md:shadow-[inset_0_0_0_1px_var(--line)]`}>
         <div className="flex items-center justify-between px-4 pt-4 pb-2">
           <h1 className="m-0 font-display text-3xl font-normal">Messages</h1>
+        </div>
+        <div className="px-3 pb-2">
+          <label className="flex h-10 items-center gap-2 rounded-full bg-surface-2 px-3.5 text-ink-3 focus-within:shadow-[inset_0_0_0_2px_var(--accent)]">
+            <Icon name="search" size={16} className="shrink-0" />
+            <span className="sr-only">Search people or chats</span>
+            <input type="search" value={query} onChange={(e) => onSearch(e.target.value)} placeholder="Search people to message"
+                   autoComplete="off" className="min-w-0 flex-1 bg-transparent text-[14px] text-ink outline-none placeholder:text-ink-3" />
+          </label>
         </div>
         <div role="tablist" aria-label="Inbox" className="flex gap-1 border-b border-line px-3">
           {([['chats', 'Chats', chats.reduce((n, c) => n + c.unread, 0)], ['requests', 'Requests', requests.length]] as const).map(([id, label, n]) => (
@@ -99,11 +138,36 @@ export function Messenger({ me, initial }: { me: string; initial: string | null 
           ))}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+          {q.length >= 2 && (
+            <section aria-label="People" className="mb-2 border-b border-line pb-2">
+              <h2 className="eyebrow m-0 px-2.5 pt-2 pb-1">People</h2>
+              {people === null ? (
+                <span className="skeleton mx-2 block h-12" />
+              ) : newPeople.length === 0 ? (
+                <p className="m-0 px-2.5 py-2 text-[13px] text-ink-3">{(people ?? []).length ? 'Already in your chats below.' : 'Nobody found with that name.'}</p>
+              ) : (
+                <ul className="m-0 flex list-none flex-col p-0">
+                  {newPeople.map((p) => (
+                    <li key={p.id}>
+                      <button type="button" onClick={() => startWith(p)} className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left hover:bg-surface-2">
+                        <Avatar name={p.display_name} path={p.avatar_path} seed={p.username} size={40} />
+                        <span className="flex min-w-0 flex-1 flex-col leading-tight">
+                          <span className="truncate font-medium">{p.display_name}</span>
+                          <span className="truncate text-[12.5px] text-ink-3">@{p.username}{p.is_friend ? ' · Friend' : ' · Sends a message request'}</span>
+                        </span>
+                        <span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-accent px-3 text-[12.5px] font-medium text-on-accent"><Icon name="comment" size={14} />Message</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
           {list === null ? (
             <div className="flex flex-col gap-2 p-2">{[0, 1, 2, 3].map((i) => <span key={i} className="skeleton block h-14" />)}</div>
           ) : shown.length === 0 ? (
             <p className="m-0 px-4 py-10 text-center text-[13.5px] text-ink-3">
-              {tab === 'chats' ? <>No chats yet. Open a friend&apos;s profile and press <strong>Message</strong>.</> : 'No message requests. People who aren\'t your friends yet land here first.'}
+              {q ? 'No chats match.' : tab === 'chats' ? <>No chats yet. Search for someone above to start one.</> : 'No message requests. People who aren\'t your friends yet land here first.'}
             </p>
           ) : (
             <ul className="m-0 flex list-none flex-col p-0">
@@ -148,6 +212,7 @@ export function Messenger({ me, initial }: { me: string; initial: string | null 
 }
 
 type Pending = { key: string; preview: string; state: 'uploading' | 'ready' | 'failed'; path?: string; error?: string };
+type Shown = ChatMessage & { clientKey?: string; pending?: boolean };
 type ThreadBus = { incoming: (m: ChatMessage) => void; unsent: (id: string) => void };
 
 function Thread({ id, me, convo, busRef, onBack, onChanged }: {
@@ -155,7 +220,10 @@ function Thread({ id, me, convo, busRef, onBack, onChanged }: {
   onBack: () => void; onChanged: () => void;
 }) {
   const toast = useToast();
-  const [messages, setMessages] = useState<ChatMessage[] | null>(null);
+  const [messages, setMessages] = useState<Shown[] | null>(null);
+  // Messages that arrived or were sent while the chat is open: only these animate in.
+  const [fresh, setFresh] = useState<Set<string>>(new Set());
+  const sendingRef = useRef(0);
   const [more, setMore] = useState(true);
   const [text, setText] = useState('');
   const [photos, setPhotos] = useState<Pending[]>([]);
@@ -170,7 +238,8 @@ function Thread({ id, me, convo, busRef, onBack, onChanged }: {
   const lastTyping = useRef(0);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const scrollDown = () => requestAnimationFrame(() => endRef.current?.scrollIntoView({ block: 'end' }));
+  const scrollDown = (smooth = false) => requestAnimationFrame(() => endRef.current?.scrollIntoView({ block: 'end', behavior: smooth ? 'smooth' : 'auto' }));
+  const markFresh = (key: string) => setFresh((s) => new Set(s).add(key));
 
   useEffect(() => {
     let live = true;
@@ -192,9 +261,12 @@ function Thread({ id, me, convo, busRef, onBack, onChanged }: {
   useEffect(() => {
     busRef.current = {
       incoming: (m) => {
+        // Your own message from this tab is already on screen (optimistic); the send reply swaps it in.
+        if (m.sender_id === me && sendingRef.current > 0) return;
         setMessages((list) => (list && !list.some((x) => x.id === m.id) ? [...list, m] : list));
+        markFresh(m.id);
         setTyping(false);
-        scrollDown();
+        scrollDown(true);
         if (m.sender_id !== me) markConversationRead(id).then(onChanged);
       },
       unsent: (mid) => setMessages((list) => list?.map((m) => (m.id === mid ? { ...m, deleted_at: new Date().toISOString(), body: '', images: [] } : m)) ?? list),
@@ -262,14 +334,34 @@ function Thread({ id, me, convo, busRef, onBack, onChanged }: {
     const body = text.trim();
     const ready = photos.filter((p) => p.state === 'ready' && p.path).map((p) => p.path!);
     if (!body && !ready.length) return;
+    // Show it straight away (slightly faded) and clear the box; the server's reply replaces it in place.
+    const key = `tmp-${crypto.randomUUID()}`;
+    const sentPhotos = photos;
+    const draft: Shown = {
+      id: key, clientKey: key, pending: true, conversation_id: id, sender_id: me, body, deleted_at: null,
+      created_at: new Date().toISOString(),
+      images: sentPhotos.filter((p) => p.state === 'ready' && p.path).map((p) => ({ path: p.path!, url: p.preview, width: null, height: null })),
+    };
+    setMessages((list) => [...(list ?? []), draft]);
+    markFresh(key);
+    setText('');
+    setPhotos([]);
+    scrollDown(true);
+    sendingRef.current += 1;
     start(async () => {
       const r = await sendMessage(id, body, ready);
-      if (!r.ok) return toast({ text: r.error, tone: 'error' });
-      setMessages((list) => (list && !list.some((m) => m.id === r.data.id) ? [...list, r.data] : list));
-      setText('');
-      for (const p of photos) URL.revokeObjectURL(p.preview);
-      setPhotos([]);
-      scrollDown();
+      sendingRef.current -= 1;
+      if (!r.ok) {
+        setMessages((list) => list?.filter((m) => m.clientKey !== key) ?? list);
+        setText(body);
+        setPhotos(sentPhotos);
+        return toast({ text: r.error, tone: 'error' });
+      }
+      setMessages((list) => {
+        const rest = (list ?? []).filter((m) => m.id !== r.data.id);
+        return rest.map((m) => (m.clientKey === key ? { ...r.data, clientKey: key } : m));
+      });
+      for (const p of sentPhotos) URL.revokeObjectURL(p.preview);
       onChanged();
     });
   };
@@ -338,7 +430,7 @@ function Thread({ id, me, convo, busRef, onBack, onChanged }: {
             {more && messages.length > 0 && <button type="button" onClick={older} className="btn btn-ghost h-8 self-center text-[12.5px]">Load earlier messages</button>}
             {messages.length === 0 && <p className="m-0 py-10 text-center text-[13.5px] text-ink-3">Say hi 👋</p>}
             {messages.map((m, i) => (
-              <Bubble key={m.id} m={m} mine={m.sender_id === me} showTime={!messages[i - 1] || Date.parse(m.created_at) - Date.parse(messages[i - 1].created_at) > 10 * 60 * 1000}
+              <Bubble key={m.clientKey ?? m.id} m={m} mine={m.sender_id === me} animate={fresh.has(m.clientKey ?? m.id)} pending={Boolean(m.pending)} showTime={!messages[i - 1] || Date.parse(m.created_at) - Date.parse(messages[i - 1].created_at) > 10 * 60 * 1000}
                       onUnsend={() => start(async () => { const r = await unsendMessage(m.id); if (!r.ok) toast({ text: r.error, tone: 'error' }); else setMessages((l) => l?.map((x) => (x.id === m.id ? { ...x, deleted_at: new Date().toISOString(), body: '', images: [] } : x)) ?? l); })}
                       onReport={() => setReporting(m.id)} onView={setViewing} />
             ))}
@@ -409,8 +501,9 @@ function Dot({ d }: { d: number }) {
   return <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-3" style={{ animationDelay: `${d}ms` }} />;
 }
 
-function Bubble({ m, mine, showTime, onUnsend, onReport, onView }: {
-  m: ChatMessage; mine: boolean; showTime: boolean; onUnsend: () => void; onReport: () => void; onView: (url: string) => void;
+function Bubble({ m, mine, showTime, animate, pending, onUnsend, onReport, onView }: {
+  m: ChatMessage; mine: boolean; showTime: boolean; animate: boolean; pending: boolean;
+  onUnsend: () => void; onReport: () => void; onView: (url: string) => void;
 }) {
   const [menu, setMenu] = useState(false);
   const slugs = useMemo(() => [...new Set([...m.body.matchAll(TEMPLATE_LINK)].map((x) => x[1].toLowerCase()))].slice(0, 3), [m.body]);
@@ -426,10 +519,11 @@ function Bubble({ m, mine, showTime, onUnsend, onReport, onView }: {
     return <p className={`m-0 max-w-[75%] rounded-2xl px-3.5 py-2 text-[13px] text-ink-3 italic shadow-[inset_0_0_0_1px_var(--line)] ${mine ? 'self-end' : ''}`}>Message unsent</p>;
   }
   return (
-    <div className={`group flex flex-col gap-1 ${mine ? 'items-end' : 'items-start'}`}>
+    <div className={`group flex flex-col gap-1 transition-opacity duration-200 ${mine ? 'items-end' : 'items-start'} ${animate ? (mine ? 'msg-in-mine' : 'msg-in-theirs') : ''} ${pending ? 'opacity-60' : ''}`}
+         aria-busy={pending || undefined}>
       {showTime && <span className="self-center py-2 text-[11.5px] text-ink-3">{timeAgo(m.created_at)}</span>}
       <div className={`flex max-w-[80%] items-center gap-1 ${mine ? 'flex-row-reverse' : ''}`}>
-        <div className="flex min-w-0 flex-col gap-1">
+        <div className={`flex min-w-0 flex-col gap-1 ${mine ? 'items-end' : 'items-start'}`}>
           {m.images.length > 0 && (
             <div className={`grid gap-1 overflow-hidden rounded-2xl ${m.images.length > 1 ? 'grid-cols-2' : ''}`}>
               {m.images.map((i) => i.url ? (
@@ -451,7 +545,7 @@ function Bubble({ m, mine, showTime, onUnsend, onReport, onView }: {
             <div key={c.id} className="w-72 max-w-full rounded-xl bg-surface-2 shadow-[inset_0_0_0_1px_var(--line)]"><TemplateRow t={c} /></div>
           ))}
         </div>
-        <div className="relative opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+        {!pending && <div className="relative opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           <button type="button" onClick={() => setMenu((v) => !v)} aria-label="Message options" className="inline-flex h-8 w-8 items-center justify-center rounded-full text-ink-3 hover:bg-surface-2">
             <Icon name="kebab" size={15} />
           </button>
@@ -462,7 +556,7 @@ function Bubble({ m, mine, showTime, onUnsend, onReport, onView }: {
                 : <button role="menuitem" type="button" onClick={() => { setMenu(false); onReport(); }} className="flex h-9 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-surface-2"><Icon name="flag" size={15} />Report</button>}
             </div>
           )}
-        </div>
+        </div>}
       </div>
     </div>
   );

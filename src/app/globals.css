@@ -146,6 +146,9 @@
 }
 @keyframes icon-swap { from { opacity: 0; transform: rotate(-90deg) scale(0.6); } to { opacity: 1; transform: none; } }
 @keyframes float-card { 0%, 100% { translate: 0 0; } 50% { translate: 0 -10px; } }
+/* Chat: a new message glides up from its own side and settles. */
+@keyframes msg-in-right { from { opacity: 0; transform: translate(12px, 10px) scale(0.94); } to { opacity: 1; transform: none; } }
+@keyframes msg-in-left { from { opacity: 0; transform: translate(-12px, 10px) scale(0.94); } to { opacity: 1; transform: none; } }
 @keyframes sheen { from { transform: translateX(-120%) skewX(-20deg); } to { transform: translateX(220%) skewX(-20deg); } }
 
 @layer components {
@@ -159,6 +162,8 @@
   .hero-zoom { animation: hero-zoom 1.8s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
   .pulse-dot { animation: pulse-dot 2.2s ease-in-out infinite; }
   .icon-swap { animation: icon-swap 0.25s ease-out; }
+  .msg-in-mine { transform-origin: bottom right; animation: msg-in-right 0.32s cubic-bezier(0.2, 0.9, 0.25, 1.15) both; }
+  .msg-in-theirs { transform-origin: bottom left; animation: msg-in-left 0.32s cubic-bezier(0.2, 0.9, 0.25, 1.15) both; }
   .float-card { animation: float-card 6s ease-in-out infinite; }
   .search-field { transition: width 0.3s cubic-bezier(0.2, 0.7, 0.2, 1), opacity 0.2s ease-out, padding 0.3s; }
 
