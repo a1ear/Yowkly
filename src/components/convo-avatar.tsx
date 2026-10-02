@@ -6,6 +6,7 @@ export function ConvoAvatar({ c, size = 44 }: { c: Pick<Conversation, 'kind' | '
   if (c.kind !== 'group') {
     return <Avatar name={c.other_display_name} path={c.other_avatar_path} seed={c.other_username ?? c.other_display_name} size={size} />;
   }
+  if (c.other_avatar_path) return <Avatar name={c.other_display_name} path={c.other_avatar_path} seed={c.other_display_name} size={size} />;
   const [a, b] = c.members ?? [];
   const small = Math.round(size * 0.68);
   if (!a) return <Avatar name={c.other_display_name} seed={c.other_display_name} size={size} />;

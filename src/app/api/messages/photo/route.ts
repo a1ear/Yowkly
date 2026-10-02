@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { userClient } from '@/lib/supabase/clients';
 import { rateLimit } from '@/lib/rate-limit';
-import { putObject } from '@/lib/r2';
+import { getObject, putObject } from '@/lib/r2';
 import { toUserError } from '@/lib/actions';
 
 const MAX = 4 * 1024 * 1024;
@@ -50,4 +50,35 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Photo uploads are temporarily unavailable.' }, { status: 502, headers });
   }
   return NextResponse.json({ path }, { headers });
+}
+
+const PHOTO_PATH = /^dm\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.(png|jpg|webp|gif)$/;
+const TYPES: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' };
+
+/**
+ * A chat photo's bytes, from our own domain, for "Copy image" (the browser can
+ * only copy an image it is allowed to read, and the storage links are on
+ * another domain). Only people in the conversation get it.
+ */
+export async function GET(request: Request) {
+  const headers = { 'Cache-Control': 'private, no-store' };
+  const path = new URL(request.url).searchParams.get('path') ?? '';
+  if (!PHOTO_PATH.test(path)) return NextResponse.json({ error: 'Photo not found.' }, { status: 404, headers });
+  const db = await userClient();
+  const { data } = await db.auth.getClaims();
+  const uid = data?.claims?.sub;
+  if (!uid) return NextResponse.json({ error: 'Sign in first.' }, { status: 401, headers });
+  const rl = await rateLimit('write', uid);
+  if (!rl.ok) return NextResponse.json({ error: 'Slow down a little and try again.' }, { status: 429, headers });
+  const { data: visible } = await db.rpc('visible_message_images', { p_paths: [path] });
+  if (!((visible ?? []) as string[]).includes(path)) return NextResponse.json({ error: 'Photo not found.' }, { status: 404, headers });
+  try {
+    const res = await getObject('template-files', path);
+    return new Response(res.body, {
+      headers: { ...headers, 'Content-Type': TYPES[path.split('.').pop()!], 'X-Content-Type-Options': 'nosniff' },
+    });
+  } catch (e) {
+    console.error('[messages] photo read failed', (e as Error).message);
+    return NextResponse.json({ error: 'Could not load the photo.' }, { status: 502, headers });
+  }
 }

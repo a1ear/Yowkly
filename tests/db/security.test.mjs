@@ -973,6 +973,19 @@ test('group chats: friends only, admins manage, members only, notices, unread', 
   for (const x of extra) await befriend(gia, x);
   fails(await as(db, gia, `select public.add_group_members($1, $2::uuid[])`, [g, [...extra, kim]]), /up to 10/);
 
+  // Group photo: admins only, only a file in your own folder that really exists.
+  const photo = (uid, path) => as(db, uid, `select public.set_group_photo($1, $2)`, [g, path]);
+  const own = `${gia}/group-abc123def456.webp`;
+  fails(await photo(ivy, `${ivy}/group-abc123def456.webp`), /Only group admins/, 'member sets the photo');
+  fails(await photo(gia, `${hal}/group-abc123def456.webp`), /Invalid image/, 'someone else\'s file');
+  fails(await photo(gia, `${gia}/avatar-abc123def456.webp`), /Invalid image/, 'not a group photo path');
+  fails(await photo(gia, own), /Upload the photo first/, 'a file that was never uploaded');
+  await sql(`insert into storage.objects (bucket_id, name, owner) values ('avatars', $1, $2)`, [own, gia]);
+  ok(await photo(gia, own));
+  assert.equal((await inbox(ivy)).other_avatar_path ?? ok(await as(db, ivy, `select other_avatar_path from public.my_conversations() where id = $1`, [g]))[0].other_avatar_path, own, 'members see the photo');
+  fails(await as(db, gia, `update public.conversations set photo_path = null where id = $1`, [g]), /permission denied/, 'direct update');
+  ok(await photo(gia, null));
+
   // Notices can't be unsent.
   const [notice] = await sql(`select id from public.messages where conversation_id = $1 and kind = 'system' limit 1`, [g]);
   fails(await as(db, gia, `select public.delete_message($1)`, [notice.id]), /not found/, 'unsending a notice');

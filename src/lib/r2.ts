@@ -79,6 +79,13 @@ export async function presignView(bucket: LogicalBucket, key: string, expiresIn 
   return signed.url;
 }
 
+/** Server-side read (the caller has already checked the person may see it). */
+export async function getObject(bucket: LogicalBucket, key: string) {
+  const res = await r2().fetch(objectUrl(bucket, key), { method: 'GET' });
+  if (!res.ok) throw new Error(`R2 read failed with ${res.status}`);
+  return res;
+}
+
 /** Server-side upload (the server has already checked the bytes). */
 export async function putObject(bucket: LogicalBucket, key: string, body: ArrayBuffer, contentType: string) {
   const res = await r2().fetch(objectUrl(bucket, key), {

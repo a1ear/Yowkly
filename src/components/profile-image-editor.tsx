@@ -15,7 +15,7 @@ const MAX_INPUT = 20 * 1024 * 1024;
  * photo becomes a ~200 KB image: fast on slow connections and well under the
  * bucket's 2 MB limit. WebP where the browser can encode it, JPEG otherwise.
  */
-async function prepare(file: File, kind: 'avatar' | 'cover') {
+export async function prepare(file: File, kind: 'avatar' | 'cover') {
   const bmp = await createImageBitmap(file);
   const [tw, th] = SIZE[kind];
   const scale = Math.max(tw / bmp.width, th / bmp.height);

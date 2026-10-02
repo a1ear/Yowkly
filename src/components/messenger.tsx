@@ -247,7 +247,7 @@ export function Thread({ id, me, convo, busRef, onBack, onChanged, dock }: {
   const [blocked, setBlockedState] = useState(false);
   const [menu, setMenu] = useState(false);
   const [reporting, setReporting] = useState<string | null>(null);
-  const [viewing, setViewing] = useState<string | null>(null);
+  const [viewing, setViewing] = useState<{ url: string; path: string } | null>(null);
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [groupDialog, setGroupDialog] = useState<'members' | 'rename' | null>(null);
   const [live, setLive] = useState<LiveGroupCall | null>(null);
@@ -357,9 +357,9 @@ export function Thread({ id, me, convo, busRef, onBack, onChanged, dock }: {
     setMessages((list) => [...m, ...(list ?? [])]);
   };
 
-  const addPhotos = async (files: FileList | null) => {
+  const addPhotos = async (files: FileList | File[] | null) => {
     if (!files) return;
-    for (const f of Array.from(files).slice(0, 4 - photos.length)) {
+    for (const f of Array.from(files).slice(0, Math.max(0, 4 - photos.length))) {
       if (!/^image\/(png|jpeg|webp|gif)$/.test(f.type)) { toast({ text: 'Use PNG, JPG, WebP or GIF images.', tone: 'error' }); continue; }
       const key = crypto.randomUUID();
       setPhotos((p) => [...p, { key, preview: URL.createObjectURL(f), state: 'uploading' }]);
@@ -588,8 +588,10 @@ export function Thread({ id, me, convo, busRef, onBack, onChanged, dock }: {
               ))}
             </ul>
           )}
-          <form onSubmit={(e) => { e.preventDefault(); send(); }} className="flex items-end gap-2">
-            <button type="button" onClick={() => fileRef.current?.click()} disabled={photos.length >= 4} aria-label="Add photos"
+          <form onSubmit={(e) => { e.preventDefault(); send(); }} className="flex items-end gap-2"
+                onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); }}
+                onDrop={(e) => { const files = imageFiles(e.dataTransfer.files); if (files.length) { e.preventDefault(); addPhotos(files); } }}>
+            <button type="button" onClick={() => fileRef.current?.click()} disabled={photos.length >= 4} aria-label="Add photos" title="Add photos (or paste them with Ctrl+V)"
                     className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-2 hover:bg-surface-2 disabled:opacity-40">
               <Icon name="camera" size={20} />
             </button>
@@ -598,6 +600,14 @@ export function Thread({ id, me, convo, busRef, onBack, onChanged, dock }: {
               <span className="sr-only">Message</span>
               <textarea value={text} onChange={(e) => onType(e.target.value)} rows={1} maxLength={MAX} placeholder="Message…"
                         onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }}
+                        onPaste={(e) => {
+                          // Ctrl+V a screenshot or a copied image: it becomes a photo in the message.
+                          const files = imageFiles(e.clipboardData.files);
+                          if (!files.length) return;
+                          e.preventDefault();
+                          if (photos.length >= 4) return toast({ text: 'A message can have up to 4 photos.', tone: 'error' });
+                          addPhotos(files);
+                        }}
                         className="field max-h-40 min-h-11 resize-none py-2.5" />
             </label>
             <button disabled={pending || uploading || (!text.trim() && !photos.some((p) => p.state === 'ready'))} aria-label="Send"
@@ -609,18 +619,13 @@ export function Thread({ id, me, convo, busRef, onBack, onChanged, dock }: {
       )}
       {reporting && <ReportDialog targetType="message" targetId={reporting} onClose={() => setReporting(null)} />}
       {isGroup && groupDialog === 'members' && (
-        <GroupMembersDialog id={id} me={me} members={members} myRole={convo?.my_role ?? null} onClose={() => setGroupDialog(null)}
+        <GroupMembersDialog id={id} me={me} title={convo?.other_display_name ?? 'Group'} photoPath={convo?.other_avatar_path ?? null} members={members} myRole={convo?.my_role ?? null} onClose={() => setGroupDialog(null)}
                             onChanged={() => { loadGroup(); onChanged(); }} onLeft={() => { setGroupDialog(null); onChanged(); if (dock) dock.onClose(); else onBack(); }} />
       )}
       {isGroup && groupDialog === 'rename' && convo && (
         <RenameGroupDialog id={id} current={convo.other_display_name} onClose={() => setGroupDialog(null)} onChanged={onChanged} />
       )}
-      {viewing && (
-        <Dialog open onClose={() => setViewing(null)} title="Photo" width={1000}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={viewing} alt="" className="max-h-[75vh] w-full rounded-lg object-contain" />
-        </Dialog>
-      )}
+      {viewing && <PhotoViewer photo={viewing} onClose={() => setViewing(null)} />}
     </>
   );
 }
@@ -631,9 +636,11 @@ function Dot({ d }: { d: number }) {
 
 function Bubble({ m, mine, showTime, showSender, animate, pending, onUnsend, onReport, onView }: {
   m: ChatMessage; mine: boolean; showTime: boolean; showSender?: boolean; animate: boolean; pending: boolean;
-  onUnsend: () => void; onReport: () => void; onView: (url: string) => void;
+  onUnsend: () => void; onReport: () => void; onView: (photo: { url: string; path: string }) => void;
 }) {
   const [menu, setMenu] = useState(false);
+  const toast = useToast();
+  const copyFirst = () => { const i = m.images.find((x) => x.url); if (i) copyPhoto(i.path, toast); };
   const slugs = useMemo(() => [...new Set([...m.body.matchAll(TEMPLATE_LINK)].map((x) => x[1].toLowerCase()))].slice(0, 3), [m.body]);
   const [cards, setCards] = useState<Card[]>([]);
   useEffect(() => {
@@ -672,7 +679,9 @@ function Bubble({ m, mine, showTime, showSender, animate, pending, onUnsend, onR
           {m.images.length > 0 && (
             <div className={`grid gap-1 overflow-hidden rounded-2xl ${m.images.length > 1 ? 'grid-cols-2' : ''}`}>
               {m.images.map((i) => i.url ? (
-                <button key={i.path} type="button" onClick={() => onView(i.url!)} className="overflow-hidden bg-surface-2">
+                <button key={i.path} type="button" onClick={() => onView({ url: i.url!, path: i.path })} title="Open photo (Ctrl+C copies it)"
+                        onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && !pending) { e.preventDefault(); copyPhoto(i.path, toast); } }}
+                        className="overflow-hidden bg-surface-2">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={i.url} alt="Photo" loading="lazy" width={i.width ?? undefined} height={i.height ?? undefined}
                        className={`${m.images.length > 1 ? 'aspect-square' : 'max-h-80'} w-full object-cover`} />
@@ -696,6 +705,9 @@ function Bubble({ m, mine, showTime, showSender, animate, pending, onUnsend, onR
           </button>
           {menu && (
             <div role="menu" className={`absolute top-9 z-10 w-40 rounded-xl bg-surface-1 p-1.5 shadow-e2 ring-1 ring-line ${mine ? 'right-0' : 'left-0'}`}>
+              {m.images.some((x) => x.url) && (
+                <button role="menuitem" type="button" onClick={() => { setMenu(false); copyFirst(); }} className="flex h-9 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-surface-2"><Icon name="file" size={15} />Copy photo</button>
+              )}
               {mine
                 ? <button role="menuitem" type="button" onClick={() => { setMenu(false); onUnsend(); }} className="flex h-9 w-full items-center gap-2 rounded-md px-3 text-left text-sm text-danger hover:bg-surface-2"><Icon name="trash" size={15} />Unsend</button>
                 : <button role="menuitem" type="button" onClick={() => { setMenu(false); onReport(); }} className="flex h-9 w-full items-center gap-2 rounded-md px-3 text-left text-sm hover:bg-surface-2"><Icon name="flag" size={15} />Report</button>}
@@ -704,5 +716,66 @@ function Bubble({ m, mine, showTime, showSender, animate, pending, onUnsend, onR
         </div>}
       </div>
     </div>
+  );
+}
+
+const IMAGE_TYPES = /^image\/(png|jpeg|webp|gif)$/;
+function imageFiles(list: FileList | null | undefined): File[] {
+  return Array.from(list ?? []).filter((f) => IMAGE_TYPES.test(f.type));
+}
+
+/**
+ * Copy a chat photo to the clipboard so it can be pasted anywhere (Ctrl+V).
+ * Clipboards take PNG, so other formats are redrawn as PNG first. The bytes come
+ * from our own server, which checks you're in the conversation.
+ */
+async function copyPhoto(path: string, toast: ReturnType<typeof useToast>) {
+  if (typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) {
+    return toast({ text: 'Your browser can\'t copy images. Right-click the photo and choose Copy image.', tone: 'error' });
+  }
+  const png = (async () => {
+    const res = await fetch(`/api/messages/photo?path=${encodeURIComponent(path)}`);
+    if (!res.ok) throw new Error('Could not load the photo.');
+    const blob = await res.blob();
+    if (blob.type === 'image/png') return blob;
+    const bmp = await createImageBitmap(blob);
+    const canvas = document.createElement('canvas');
+    canvas.width = bmp.width;
+    canvas.height = bmp.height;
+    canvas.getContext('2d')!.drawImage(bmp, 0, 0);
+    bmp.close();
+    return new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not copy the photo.'))), 'image/png'));
+  })();
+  try {
+    // The item is created right away (inside the click), with the image arriving later: Safari needs it that way.
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+    toast({ text: 'Photo copied. Paste it anywhere with Ctrl+V.', tone: 'ok' });
+  } catch {
+    toast({ text: 'Could not copy the photo.', tone: 'error' });
+  }
+}
+
+function PhotoViewer({ photo, onClose }: { photo: { url: string; path: string }; onClose: () => void }) {
+  const toast = useToast();
+  // Ctrl+C (Cmd+C on a Mac) copies the photo while it's open, unless you've selected some text.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && !window.getSelection()?.toString()) {
+        e.preventDefault();
+        copyPhoto(photo.path, toast);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [photo.path, toast]);
+  return (
+    <Dialog open onClose={onClose} title="Photo" width={1000}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={photo.url} alt="" className="max-h-[70vh] w-full rounded-lg object-contain" />
+      <div className="flex justify-end gap-2">
+        <a href={photo.url} target="_blank" rel="noopener noreferrer" className="btn btn-ghost"><Icon name="external" size={15} />Open full size</a>
+        <button type="button" onClick={() => copyPhoto(photo.path, toast)} className="btn btn-secondary"><Icon name="file" size={15} />Copy image</button>
+      </div>
+    </Dialog>
   );
 }

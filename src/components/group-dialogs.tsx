@@ -1,13 +1,16 @@
 'use client';
 import Link from 'next/link';
-import { useEffect, useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import {
-  addGroupMembers, createGroup, leaveGroup, listFriendsToAdd, removeGroupMember, renameGroup, setGroupAdmin,
+  addGroupMembers, createGroup, leaveGroup, listFriendsToAdd, removeGroupMember, renameGroup, setGroupAdmin, setGroupPhoto,
   type FriendPick, type GroupMember,
 } from '@/app/actions/messages';
+import { browserClient } from '@/lib/supabase/browser';
 import { Avatar } from './bits';
 import { Dialog } from './dialog';
 import { Icon } from './icons';
+import { ImageCropper } from './image-cropper';
+import { prepare } from './profile-image-editor';
 import { useToast } from './toast';
 
 const MAX_PEOPLE = 10;
@@ -97,9 +100,81 @@ export function NewGroupDialog({ open, onClose, onCreated }: { open: boolean; on
   );
 }
 
-/** Who's in the group, plus the admin tools (add, remove, make admin) and Leave. */
-export function GroupMembersDialog({ id, me, members, myRole, onClose, onChanged, onLeft }: {
-  id: string; me: string; members: GroupMember[]; myRole: 'admin' | 'member' | null;
+/**
+ * The group's picture. Admins pick a photo, crop it square, and it's shrunk in the
+ * browser and stored in their own folder of the public avatars bucket (like a
+ * profile photo); the database checks the path before the group uses it.
+ */
+function GroupPhoto({ id, me, title, photoPath, admin, onChanged }: {
+  id: string; me: string; title: string; photoPath: string | null; admin: boolean; onChanged: () => void;
+}) {
+  const toast = useToast();
+  const [cropping, setCropping] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  const db = () => browserClient();
+  // Our own old photo can go; one another admin uploaded stays in their folder.
+  const removeOld = async () => { if (photoPath?.startsWith(`${me}/`)) await db().storage.from('avatars').remove([photoPath]); };
+
+  const upload = async (file: File) => {
+    setCropping(null);
+    setBusy(true);
+    try {
+      const img = await prepare(file, 'avatar');
+      const path = `${me}/group-${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}.${img.ext}`;
+      const up = await db().storage.from('avatars').upload(path, img.blob, { contentType: img.type, cacheControl: '31536000', upsert: false });
+      if (up.error) throw new Error(up.error.message);
+      const r = await setGroupPhoto(id, path);
+      if (!r.ok) { await db().storage.from('avatars').remove([path]); throw new Error(r.error); }
+      await removeOld();
+      toast({ text: 'Group photo updated.', tone: 'ok' });
+      onChanged();
+    } catch (e) {
+      toast({ text: e instanceof Error ? e.message : 'Could not update the group photo.', tone: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async () => {
+    setBusy(true);
+    const r = await setGroupPhoto(id, null);
+    setBusy(false);
+    if (!r.ok) return toast({ text: r.error, tone: 'error' });
+    await removeOld();
+    onChanged();
+  };
+
+  return (
+    <div className="flex items-center gap-4 rounded-xl bg-surface-2 p-3">
+      <Avatar name={title} path={photoPath} seed={title} size={64} />
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <span className="truncate font-semibold">{title}</span>
+        {admin ? (
+          <span className="flex flex-wrap gap-2">
+            <button type="button" disabled={busy} onClick={() => input.current?.click()} className="btn btn-secondary h-8 px-3 text-[12.5px]">
+              <Icon name="camera" size={14} />{busy ? 'Saving…' : photoPath ? 'Change photo' : 'Add a photo'}
+            </button>
+            {photoPath && <button type="button" disabled={busy} onClick={remove} className="btn btn-ghost h-8 px-3 text-[12.5px] text-danger">Remove</button>}
+          </span>
+        ) : <span className="text-[12.5px] text-ink-3">Admins can change the group photo.</span>}
+      </div>
+      <input ref={input} type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" tabIndex={-1} aria-hidden="true"
+             onChange={(e) => {
+               const f = e.target.files?.[0];
+               e.target.value = '';
+               if (!f) return;
+               if (!/^image\/(png|jpeg|webp)$/.test(f.type)) return toast({ text: 'Use a PNG, JPEG or WebP image.', tone: 'error' });
+               if (f.size > 20 * 1024 * 1024) return toast({ text: 'That image is over 20 MB.', tone: 'error' });
+               setCropping(f);
+             }} />
+      {cropping && <ImageCropper file={cropping} round title="Crop group photo" shapes={[{ label: 'Square', aspect: 1 }]} onDone={upload} onCancel={() => setCropping(null)} />}
+    </div>
+  );
+}
+
+/** Who's in the group, plus the admin tools (photo, add, remove, make admin) and Leave. */
+export function GroupMembersDialog({ id, me, title, photoPath, members, myRole, onClose, onChanged, onLeft }: {
+  id: string; me: string; title: string; photoPath: string | null; members: GroupMember[]; myRole: 'admin' | 'member' | null;
   onClose: () => void; onChanged: () => void; onLeft: () => void;
 }) {
   const toast = useToast();
@@ -139,6 +214,7 @@ export function GroupMembersDialog({ id, me, members, myRole, onClose, onChanged
         </div>
       ) : (
         <div className="flex flex-col gap-3">
+          <GroupPhoto id={id} me={me} title={title} photoPath={photoPath} admin={admin} onChanged={onChanged} />
           {admin && members.length < MAX_PEOPLE && (
             <button type="button" onClick={() => setAdding(true)} className="btn btn-secondary self-start"><Icon name="plus" size={16} />Add people</button>
           )}

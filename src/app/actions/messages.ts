@@ -236,3 +236,13 @@ export async function leaveGroup(conversationId: string): Promise<ActionResult> 
   if (!uuid.safeParse(conversationId).success) return fail('Invalid group.');
   return groupRpc('leave_group', { p_conversation: conversationId });
 }
+
+/** Set (or with null, remove) the group photo. The file is already in your folder of the avatars bucket. */
+export async function setGroupPhoto(conversationId: string, path: string | null): Promise<ActionResult> {
+  if (!uuid.safeParse(conversationId).success) return fail('Invalid group.');
+  const a = await authed('write');
+  if ('error' in a) return a.error;
+  if (path !== null && !new RegExp(`^${a.uid}/group-[a-z0-9]{8,32}\\.(webp|jpg)$`).test(path)) return fail('Invalid image.');
+  const { error } = await a.db.rpc('set_group_photo', { p_conversation: conversationId, p_path: path });
+  return error ? fail(toUserError(error)) : { ok: true, data: null };
+}
