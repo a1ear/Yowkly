@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { listConversations, type Conversation } from '@/app/actions/messages';
-import { Avatar } from './bits';
+import { ConvoAvatar, previewLine } from './convo-avatar';
 import { Icon } from './icons';
 import { openChat } from './chat-dock';
 import { timeAgo } from '@/lib/format';
@@ -74,13 +74,13 @@ export function MessagesBell({ unread }: { unread: number }) {
                     {chats.map((c) => (
                       <li key={c.id} className="group relative">
                         <button type="button" onClick={() => go(c.id)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-surface-2 ${c.unread ? 'bg-surface-2' : ''}`}>
-                          <Avatar name={c.other_display_name} path={c.other_avatar_path} seed={c.other_username} size={40} />
+                          <ConvoAvatar c={c} size={40} />
                           <span className="flex min-w-0 flex-1 flex-col">
                             <span className="flex items-baseline justify-between gap-2">
                               <span className={`truncate ${c.unread ? 'font-semibold' : 'font-medium'}`}>{c.other_display_name}</span>
                               {c.last_message_at && <span className="shrink-0 text-[11.5px] text-ink-3">{timeAgo(c.last_message_at)}</span>}
                             </span>
-                            <span className={`truncate pr-8 text-[13px] ${c.unread ? 'text-ink' : 'text-ink-3'}`}>{c.last_from_me ? 'You: ' : ''}{c.last_preview ?? 'New chat'}</span>
+                            <span className={`truncate pr-8 text-[13px] ${c.unread ? 'text-ink' : 'text-ink-3'}`}>{previewLine(c)}</span>
                           </span>
                           {c.unread > 0 && <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-accent" aria-label={`${c.unread} unread`} />}
                         </button>

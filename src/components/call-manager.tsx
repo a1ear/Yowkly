@@ -4,6 +4,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import { realtimeClient } from '@/lib/supabase/browser';
 import { answerCall, callStatus, declineCall, endCall, incomingCall, startCall } from '@/app/actions/calls';
 import { START_CALL_EVENT } from '@/lib/events';
+import { canShareScreen, otherCallBusy, pickScreen, setCallBusy, startRinging } from '@/lib/call-state';
 import { Avatar } from './bits';
 import { Icon } from './icons';
 import { useToast } from './toast';
@@ -14,29 +15,7 @@ type Call = { id: string; role: 'caller' | 'callee'; video: boolean; peer: Peer 
 type Signal = { type: 'ready' } | { type: 'offer' | 'answer'; sdp: RTCSessionDescriptionInit } | { type: 'ice'; candidate: RTCIceCandidateInit } | { type: 'hangup' };
 
 const RING_TIMEOUT = 45_000;
-
-/** A soft two-tone ring made with Web Audio (no sound files to download). */
-function startRinging(outgoing: boolean) {
-  try {
-    const ctx = new AudioContext();
-    const beep = () => {
-      const o = ctx.createOscillator();
-      const g = ctx.createGain();
-      o.frequency.value = outgoing ? 440 : 660;
-      g.gain.setValueAtTime(0.0001, ctx.currentTime);
-      g.gain.exponentialRampToValueAtTime(0.08, ctx.currentTime + 0.05);
-      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.9);
-      o.connect(g).connect(ctx.destination);
-      o.start();
-      o.stop(ctx.currentTime + 1);
-    };
-    beep();
-    const id = setInterval(beep, outgoing ? 3000 : 2000);
-    return () => { clearInterval(id); ctx.close().catch(() => {}); };
-  } catch {
-    return () => {};
-  }
-}
+const WHO = 'direct';
 
 /**
  * Voice and video calls between friends. The media goes directly between the
@@ -50,6 +29,8 @@ export function CallManager({ me }: { me: string }) {
   const [call, setCall] = useState<Call | null>(null);
   const [muted, setMuted] = useState(false);
   const [camOn, setCamOn] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const screenRef = useRef<MediaStreamTrack | null>(null);
   const [remoteVideo, setRemoteVideo] = useState(false);
   const [big, setBig] = useState(false);
   const [startedAt, setStartedAt] = useState<number | null>(null);
@@ -69,7 +50,7 @@ export function CallManager({ me }: { me: string }) {
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const callRef = useRef<Call | null>(null);
   const phaseRef = useRef<Phase>('idle');
-  useEffect(() => { callRef.current = call; phaseRef.current = phase; }, [call, phase]);
+  useEffect(() => { callRef.current = call; phaseRef.current = phase; setCallBusy(WHO, phase !== 'idle'); }, [call, phase]);
 
   // ── teardown ─────────────────────────────────────────────────────────
   const cleanup = useCallback((message?: string) => {
@@ -80,10 +61,12 @@ export function CallManager({ me }: { me: string }) {
     pcRef.current = null;
     localRef.current?.getTracks().forEach((t) => t.stop());
     localRef.current = null;
+    screenRef.current?.stop();
+    screenRef.current = null;
     remoteRef.current = null;
     pendingIce.current = [];
     if (chRef.current) { realtimeClient().then((db) => { if (chRef.current) db.removeChannel(chRef.current); chRef.current = null; }); }
-    setCall(null); setPhase('idle'); setMuted(false); setCamOn(false); setRemoteVideo(false); setStartedAt(null); setBig(false);
+    setCall(null); setPhase('idle'); setMuted(false); setCamOn(false); setRemoteVideo(false); setStartedAt(null); setBig(false); setSharing(false);
     if (message) toast({ text: message, tone: 'ok' });
   }, [toast]);
 
@@ -182,7 +165,7 @@ export function CallManager({ me }: { me: string }) {
 
   // ── starting and answering ───────────────────────────────────────────
   const begin = useCallback(async (conversationId: string, video: boolean, peer: Peer) => {
-    if (phaseRef.current !== 'idle') return toast({ text: 'You are already in a call.', tone: 'error' });
+    if (phaseRef.current !== 'idle' || otherCallBusy(WHO)) return toast({ text: 'You are already in a call.', tone: 'error' });
     let stream: MediaStream;
     try { stream = await getMedia(video); } catch {
       return toast({ text: 'Allow microphone access (and camera for video) to call.', tone: 'error' });
@@ -234,9 +217,10 @@ export function CallManager({ me }: { me: string }) {
     let cancelled = false;
     let cleanupCh = () => {};
     const ring = async () => {
-      if (phaseRef.current !== 'idle') return;
+      if (phaseRef.current !== 'idle' || otherCallBusy(WHO)) return;
       const inc = await incomingCall();
-      if (!inc || phaseRef.current !== 'idle') return;
+      // Group calls ring through the group call manager.
+      if (!inc || inc.is_group || phaseRef.current !== 'idle' || otherCallBusy(WHO)) return;
       const c: Call = { id: inc.id, role: 'callee', video: inc.video, peer: { display_name: inc.caller_display_name, username: inc.caller_username, avatar_path: inc.caller_avatar_path } };
       callRef.current = c;
       setCall(c); setPhase('incoming');
@@ -300,18 +284,45 @@ export function CallManager({ me }: { me: string }) {
     if (!sender) return;
     if (camOn) {
       localRef.current?.getVideoTracks().forEach((t) => { t.stop(); localRef.current?.removeTrack(t); });
-      await sender.replaceTrack(null);
+      if (!screenRef.current) await sender.replaceTrack(null);
       setCamOn(false);
     } else {
       try {
         const cam = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' } });
         const track = cam.getVideoTracks()[0];
         localRef.current?.addTrack(track);
-        await sender.replaceTrack(track);
-        if (localEl.current) localEl.current.srcObject = localRef.current;
+        if (!screenRef.current) {
+          await sender.replaceTrack(track);
+          if (localEl.current) localEl.current.srcObject = localRef.current;
+        }
         setCamOn(true);
       } catch { toast({ text: 'Allow camera access to turn video on.', tone: 'error' }); }
     }
+  };
+  // Screen sharing takes over the video slot; the camera comes back when it stops.
+  const videoSender = () => pcRef.current?.getTransceivers().find((t) => t.receiver.track.kind === 'video')?.sender;
+  const stopShare = async () => {
+    const screen = screenRef.current;
+    if (!screen) return;
+    screen.stop();
+    screenRef.current = null;
+    const cam = localRef.current?.getVideoTracks()[0] ?? null;
+    await videoSender()?.replaceTrack(cam).catch(() => {});
+    if (localEl.current) localEl.current.srcObject = localRef.current;
+    setSharing(false);
+  };
+  const toggleShare = async () => {
+    if (screenRef.current) return stopShare();
+    const sender = videoSender();
+    if (!sender) return;
+    try {
+      const track = await pickScreen();
+      track.onended = () => { stopShare(); }; // the browser's own "Stop sharing" button
+      screenRef.current = track;
+      await sender.replaceTrack(track);
+      if (localEl.current) localEl.current.srcObject = new MediaStream([track]);
+      setSharing(true);
+    } catch { /* cancelled the picker */ }
   };
 
   if (phase === 'idle' || !call) return null;
@@ -353,7 +364,7 @@ export function CallManager({ me }: { me: string }) {
             <span className="text-[13px] text-[#B8B3A8]">{phase === 'active' ? 'Voice only' : status}</span>
           </span>
         )}
-        <video ref={setLocalEl} autoPlay playsInline muted className={`absolute right-3 bottom-3 w-28 rounded-lg ring-1 ring-white/20 ${camOn ? '' : 'hidden'}`} style={{ transform: 'scaleX(-1)' }} />
+        <video ref={setLocalEl} autoPlay playsInline muted className={`absolute right-3 bottom-3 w-28 rounded-lg ring-1 ring-white/20 ${camOn || sharing ? '' : 'hidden'}`} style={sharing ? undefined : { transform: 'scaleX(-1)' }} />
         <button type="button" onClick={() => setBig((v) => !v)} aria-label={big ? 'Make the call window smaller' : 'Make the call window bigger'}
                 className="absolute top-2 right-2 inline-flex h-9 w-9 items-center justify-center rounded-full bg-black/50 hover:bg-black/70">
           <Icon name="maximize" size={15} />
@@ -372,6 +383,12 @@ export function CallManager({ me }: { me: string }) {
                 className={`inline-flex h-11 w-11 items-center justify-center rounded-full ${camOn ? 'bg-[#F2EFE8] text-[#0f0e0c]' : 'bg-white/10 hover:bg-white/20'}`}>
           <Icon name={camOn ? 'video' : 'videoOff'} size={18} />
         </button>
+        {canShareScreen() && (
+          <button type="button" onClick={toggleShare} disabled={phase === 'outgoing'} aria-pressed={sharing} aria-label={sharing ? 'Stop sharing your screen' : 'Share your screen'}
+                  className={`inline-flex h-11 w-11 items-center justify-center rounded-full ${sharing ? 'bg-[#F2EFE8] text-[#0f0e0c]' : 'bg-white/10 hover:bg-white/20'}`}>
+            <Icon name="monitor" size={18} />
+          </button>
+        )}
         <button type="button" onClick={() => hangUp()} aria-label="Hang up" className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-danger text-white hover:opacity-90">
           <Icon name="phoneOff" size={18} />
         </button>

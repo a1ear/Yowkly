@@ -12,3 +12,6 @@ export const POST_DRAFT_EVENT = 'yowkly:post-draft';
 
 /** Start a call from a chat (detail = { conversationId, video, peer: { display_name, username, avatar_path } }). */
 export const START_CALL_EVENT = 'yowkly:start-call';
+
+/** Start (or join) the call in a group chat (detail = { conversationId, video, title }). */
+export const START_GROUP_CALL_EVENT = 'yowkly:start-group-call';

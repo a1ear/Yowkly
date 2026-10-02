@@ -6,6 +6,7 @@ import { useMe } from './header-account';
 // The call code (WebRTC + the realtime client) loads after the page is idle, and only for
 // signed-in people, so it never slows down the first view of a page.
 const CallManager = dynamic(() => import('./call-manager').then((m) => m.CallManager), { ssr: false });
+const GroupCallManager = dynamic(() => import('./group-call').then((m) => m.GroupCallManager), { ssr: false });
 
 export function CallLauncher() {
   const me = useMe();
@@ -17,5 +18,10 @@ export function CallLauncher() {
     else { const id = setTimeout(() => setReady(true), 1500); return () => clearTimeout(id); }
   }, [me]);
   if (!me || !ready) return null;
-  return <CallManager me={me.id} />;
+  return (
+    <>
+      <CallManager me={me.id} />
+      <GroupCallManager me={me} />
+    </>
+  );
 }

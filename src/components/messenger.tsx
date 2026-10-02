@@ -5,16 +5,19 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { realtimeClient } from '@/lib/supabase/browser';
 import {
-  chatTemplateCards, isBlocked, listConversations, loadMessage, loadMessages, markConversationRead,
+  chatTemplateCards, groupMembers, isBlocked, listConversations, loadMessage, loadMessages, markConversationRead,
   openConversation, respondToRequest, searchPeople, sendMessage, setBlocked, unsendMessage,
-  type ChatMessage, type Conversation, type PersonResult,
+  type ChatMessage, type Conversation, type GroupMember, type PersonResult,
 } from '@/app/actions/messages';
+import { liveGroupCall, type LiveGroupCall } from '@/app/actions/calls';
 import { shrinkImage } from '@/lib/image-shrink';
 import { timeAgo } from '@/lib/format';
-import { MESSAGES_EVENT, START_CALL_EVENT } from '@/lib/events';
+import { MESSAGES_EVENT, START_CALL_EVENT, START_GROUP_CALL_EVENT } from '@/lib/events';
 import type { TemplateCard as Card } from '@/lib/types';
 import { Avatar } from './bits';
+import { ConvoAvatar, previewLine } from './convo-avatar';
 import { Dialog } from './dialog';
+import { GroupMembersDialog, NewGroupDialog, RenameGroupDialog } from './group-dialogs';
 import { Icon } from './icons';
 import { ReportDialog } from './template/panels';
 import { TemplateRow } from './template-card';
@@ -37,6 +40,7 @@ export function Messenger({ me, initial, initialTab = 'chats' }: { me: string; i
   const toast = useToast();
   const [query, setQuery] = useState('');
   const [people, setPeople] = useState<PersonResult[] | null>(null);
+  const [newGroup, setNewGroup] = useState(false);
   const searchSeq = useRef(0);
 
   const onSearch = (v: string) => {
@@ -107,7 +111,7 @@ export function Messenger({ me, initial, initialTab = 'chats' }: { me: string; i
   // Search: filters your chats by name, and finds anyone to start a new chat with.
   const q = query.trim().toLowerCase().replace(/^@/, '');
   const shown = (tab === 'chats' ? chats : requests)
-    .filter((c) => !q || c.other_display_name.toLowerCase().includes(q) || c.other_username.toLowerCase().includes(q));
+    .filter((c) => !q || c.other_display_name.toLowerCase().includes(q) || (c.other_username ?? '').toLowerCase().includes(q));
   const newPeople = (people ?? []).filter((p) => !(list ?? []).some((c) => c.other_id === p.id && c.last_message_at));
 
   const startWith = async (p: PersonResult) => {
@@ -125,7 +129,12 @@ export function Messenger({ me, initial, initialTab = 'chats' }: { me: string; i
       <aside aria-label="Conversations" className={`${openId ? 'max-md:hidden' : ''} flex min-h-0 flex-col overflow-hidden bg-surface-1 md:rounded-2xl md:shadow-[inset_0_0_0_1px_var(--line)]`}>
         <div className="flex items-center justify-between px-4 pt-4 pb-2">
           <h1 className="m-0 font-display text-3xl font-normal">Messages</h1>
+          <button type="button" onClick={() => setNewGroup(true)} title="New group" aria-label="New group chat"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-full bg-surface-2 px-3 text-[13px] font-medium text-ink-2 hover:text-ink">
+            <Icon name="plus" size={15} />Group
+          </button>
         </div>
+        <NewGroupDialog open={newGroup} onClose={() => setNewGroup(false)} onCreated={async (gid) => { setTab('chats'); await refresh(); open(gid); }} />
         <div className="px-3 pb-2">
           <label className="flex h-10 items-center gap-2 rounded-full bg-surface-2 px-3.5 text-ink-3 focus-within:shadow-[inset_0_0_0_2px_var(--accent)]">
             <Icon name="search" size={16} className="shrink-0" />
@@ -181,8 +190,8 @@ export function Messenger({ me, initial, initialTab = 'chats' }: { me: string; i
                   <button type="button" onClick={() => open(c.id)} aria-current={c.id === openId ? 'true' : undefined}
                           className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-left hover:bg-surface-2 aria-[current=true]:bg-surface-2">
                     <span className="relative shrink-0">
-                      <Avatar name={c.other_display_name} path={c.other_avatar_path} seed={c.other_username} size={44} />
-                      {c.is_friend && <UserStatusDot userId={c.other_id} size={11} className="absolute -right-0.5 -bottom-0.5" />}
+                      <ConvoAvatar c={c} size={44} />
+                      {c.is_friend && c.other_id && <UserStatusDot userId={c.other_id} size={11} className="absolute -right-0.5 -bottom-0.5" />}
                     </span>
                     <span className="flex min-w-0 flex-1 flex-col">
                       <span className="flex items-baseline justify-between gap-2">
@@ -190,7 +199,7 @@ export function Messenger({ me, initial, initialTab = 'chats' }: { me: string; i
                         {c.last_message_at && <span className="shrink-0 text-[11.5px] text-ink-3">{timeAgo(c.last_message_at)}</span>}
                       </span>
                       <span className={`truncate text-[13px] ${c.unread ? 'text-ink' : 'text-ink-3'}`}>
-                        {c.status === 'request' && !c.incoming_request ? 'Request sent · ' : ''}{c.last_from_me ? 'You: ' : ''}{c.last_preview}
+                        {c.status === 'request' && !c.incoming_request ? 'Request sent · ' : ''}{previewLine(c)}
                       </span>
                     </span>
                     {c.unread > 0 && <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-accent" aria-label={`${c.unread} unread`} />}
@@ -239,7 +248,12 @@ export function Thread({ id, me, convo, busRef, onBack, onChanged, dock }: {
   const [menu, setMenu] = useState(false);
   const [reporting, setReporting] = useState<string | null>(null);
   const [viewing, setViewing] = useState<string | null>(null);
+  const [members, setMembers] = useState<GroupMember[]>([]);
+  const [groupDialog, setGroupDialog] = useState<'members' | 'rename' | null>(null);
+  const [live, setLive] = useState<LiveGroupCall | null>(null);
+  const [typingWho, setTypingWho] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const isGroup = convo?.kind === 'group';
   const endRef = useRef<HTMLDivElement>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const lastTyping = useRef(0);
@@ -258,11 +272,33 @@ export function Thread({ id, me, convo, busRef, onBack, onChanged, dock }: {
   }, [id]);
 
   useEffect(() => {
-    if (!convo) return;
+    if (!convo?.other_id || convo.kind === 'group') return;
     let live = true;
     isBlocked(convo.other_id).then((b) => { if (live) setBlockedState(b); });
     return () => { live = false; };
   }, [convo]);
+
+  // Groups: who's in it (for names on messages), and whether a call is going on.
+  const loadGroup = useCallback(() => {
+    groupMembers(id).then(setMembers);
+    liveGroupCall(id).then(setLive);
+  }, [id]);
+  useEffect(() => {
+    if (!isGroup) return;
+    loadGroup();
+    let cleanup = () => {};
+    let cancelled = false;
+    realtimeClient().then((db) => {
+      if (cancelled) return;
+      const ch = db.channel(`group-call-bar-${id}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'calls', filter: `conversation_id=eq.${id}` }, () => { liveGroupCall(id).then(setLive); })
+        .subscribe();
+      cleanup = () => { db.removeChannel(ch); };
+    });
+    // The bar's head count changes as people join and leave; refresh it now and then.
+    const t = setInterval(() => { liveGroupCall(id).then(setLive); }, 20_000);
+    return () => { cancelled = true; cleanup(); clearInterval(t); };
+  }, [isGroup, id, loadGroup]);
 
   // Messages arriving (or being unsent) over Realtime.
   useEffect(() => {
@@ -273,6 +309,7 @@ export function Thread({ id, me, convo, busRef, onBack, onChanged, dock }: {
         setMessages((list) => (list && !list.some((x) => x.id === m.id) ? [...list, m] : list));
         markFresh(m.id);
         setTyping(false);
+        if (m.kind === 'system') groupMembers(id).then(setMembers);
         scrollDown(true);
         if (m.sender_id !== me) markConversationRead(id).then(onChanged);
       },
@@ -290,7 +327,9 @@ export function Thread({ id, me, convo, busRef, onBack, onChanged, dock }: {
     if (cancelled) return;
     const ch = db.channel(`dm:${id}`, { config: { private: true } })
       .on('broadcast', { event: 'typing' }, (msg: { payload?: unknown }) => {
-        if ((msg.payload as { uid?: string })?.uid === me) return;
+        const uid = (msg.payload as { uid?: string })?.uid;
+        if (uid === me) return;
+        setTypingWho(uid ?? null);
         setTyping(true);
         clearTimeout(timer);
         timer = setTimeout(() => setTyping(false), 3500);
@@ -387,7 +426,7 @@ export function Thread({ id, me, convo, busRef, onBack, onChanged, dock }: {
   });
 
   const toggleBlock = () => start(async () => {
-    if (!convo) return;
+    if (!convo?.other_id) return;
     const r = await setBlocked(convo.other_id, !blocked);
     if (!r.ok) return toast({ text: r.error, tone: 'error' });
     setBlockedState(!blocked);
@@ -406,11 +445,21 @@ export function Thread({ id, me, convo, busRef, onBack, onChanged, dock }: {
             <Icon name="chevronLeft" size={20} />
           </button>
         )}
-        {convo ? (
+        {convo && isGroup ? (
+          <button type="button" onClick={() => setGroupDialog('members')} className="flex min-w-0 flex-1 items-center gap-3 text-left" aria-label={`${convo.other_display_name}: see members`}>
+            <ConvoAvatar c={convo} size={dock ? 32 : 40} />
+            <span className="flex min-w-0 flex-col leading-tight">
+              <span className={`truncate font-semibold ${dock ? 'text-[14px]' : ''}`}>{convo.other_display_name}</span>
+              <span className="truncate text-[12.5px] text-ink-3">
+                {typing ? `${members.find((x) => x.user_id === typingWho)?.display_name.split(' ')[0] ?? 'Someone'} is typing…` : `${convo.member_count} members`}
+              </span>
+            </span>
+          </button>
+        ) : convo ? (
           <Link href={`/@${convo.other_username}`} className="flex min-w-0 flex-1 items-center gap-3">
             <span className="relative shrink-0">
-              <Avatar name={convo.other_display_name} path={convo.other_avatar_path} seed={convo.other_username} size={dock ? 32 : 40} />
-              {convo.is_friend && <UserStatusDot userId={convo.other_id} size={11} className="absolute -right-0.5 -bottom-0.5" />}
+              <Avatar name={convo.other_display_name} path={convo.other_avatar_path} seed={convo.other_username ?? ''} size={dock ? 32 : 40} />
+              {convo.is_friend && convo.other_id && <UserStatusDot userId={convo.other_id} size={11} className="absolute -right-0.5 -bottom-0.5" />}
             </span>
             <span className="flex min-w-0 flex-col leading-tight">
               <span className={`truncate font-semibold ${dock ? 'text-[14px]' : ''}`}>{convo.other_display_name}</span>
@@ -418,13 +467,24 @@ export function Thread({ id, me, convo, busRef, onBack, onChanged, dock }: {
             </span>
           </Link>
         ) : <span className="flex-1" />}
-        {convo?.is_friend && convo.status === 'active' && !blocked && (
+        {convo && isGroup && (
+          <span className="flex shrink-0">
+            {([['voice', 'phoneCall', 'Group voice call'], ['video', 'video', 'Group video call']] as const).map(([kind, icon, label]) => (
+              <button key={kind} type="button" aria-label={live ? 'Join the group call' : `${label} in ${convo.other_display_name}`} title={live ? 'Join call' : label}
+                      onClick={() => window.dispatchEvent(new CustomEvent(START_GROUP_CALL_EVENT, { detail: { conversationId: id, video: kind === 'video', title: convo.other_display_name } }))}
+                      className={`inline-flex items-center justify-center rounded-full text-ink-2 hover:bg-surface-2 hover:text-accent-ink ${dock ? 'h-8 w-8' : 'h-10 w-10'}`}>
+                <Icon name={icon} size={dock ? 15 : 18} />
+              </button>
+            ))}
+          </span>
+        )}
+        {convo?.is_friend && convo.kind === 'direct' && convo.status === 'active' && !blocked && (
           <span className="flex shrink-0">
             {([['voice', 'phoneCall', 'Voice call'], ['video', 'video', 'Video call']] as const).map(([kind, icon, label]) => (
               <button key={kind} type="button" aria-label={`${label} ${convo.other_display_name}`}
                       onClick={() => window.dispatchEvent(new CustomEvent(START_CALL_EVENT, { detail: {
                         conversationId: id, video: kind === 'video',
-                        peer: { display_name: convo.other_display_name, username: convo.other_username, avatar_path: convo.other_avatar_path },
+                        peer: { display_name: convo.other_display_name, username: convo.other_username ?? '', avatar_path: convo.other_avatar_path },
                       } }))}
                       className={`inline-flex items-center justify-center rounded-full text-ink-2 hover:bg-surface-2 hover:text-accent-ink ${dock ? 'h-8 w-8' : 'h-10 w-10'}`}>
                 <Icon name={icon} size={dock ? 15 : 18} />
@@ -447,15 +507,35 @@ export function Thread({ id, me, convo, busRef, onBack, onChanged, dock }: {
             </button>
             {menu && (
               <div role="menu" className="absolute top-11 right-0 z-10 w-48 rounded-xl bg-surface-1 p-1.5 shadow-e2 ring-1 ring-line">
-                <Link role="menuitem" href={`/@${convo.other_username}`} className="flex h-10 items-center gap-2.5 rounded-md px-3 text-sm hover:bg-surface-2"><Icon name="user" size={16} />View profile</Link>
-                <button role="menuitem" type="button" onClick={toggleBlock} className="flex h-10 w-full items-center gap-2.5 rounded-md px-3 text-left text-sm text-danger hover:bg-surface-2">
-                  <Icon name="x" size={16} />{blocked ? 'Unblock' : 'Block'}
-                </button>
+                {isGroup ? (
+                  <>
+                    <button role="menuitem" type="button" onClick={() => { setMenu(false); setGroupDialog('members'); }} className="flex h-10 w-full items-center gap-2.5 rounded-md px-3 text-left text-sm hover:bg-surface-2"><Icon name="user" size={16} />Members</button>
+                    {convo.my_role === 'admin' && (
+                      <button role="menuitem" type="button" onClick={() => { setMenu(false); setGroupDialog('rename'); }} className="flex h-10 w-full items-center gap-2.5 rounded-md px-3 text-left text-sm hover:bg-surface-2"><Icon name="settings" size={16} />Rename group</button>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <Link role="menuitem" href={`/@${convo.other_username}`} className="flex h-10 items-center gap-2.5 rounded-md px-3 text-sm hover:bg-surface-2"><Icon name="user" size={16} />View profile</Link>
+                    <button role="menuitem" type="button" onClick={toggleBlock} className="flex h-10 w-full items-center gap-2.5 rounded-md px-3 text-left text-sm text-danger hover:bg-surface-2">
+                      <Icon name="x" size={16} />{blocked ? 'Unblock' : 'Block'}
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </div>
         )}
       </header>
+      {isGroup && live && (
+        <div className="flex items-center gap-3 border-b border-line bg-[color-mix(in_oklab,var(--success)_12%,transparent)] px-3 py-2 text-[13px] md:px-4">
+          <span className="relative flex h-2.5 w-2.5 shrink-0"><span className="absolute inset-0 animate-ping rounded-full bg-success opacity-60" /><span className="relative h-2.5 w-2.5 rounded-full bg-success" /></span>
+          <span className="min-w-0 flex-1 truncate">{live.video ? 'Video call' : 'Call'} going on · {live.joined} in it{live.joined >= 6 ? ' (full)' : ''}</span>
+          <button type="button" disabled={live.joined >= 6}
+                  onClick={() => window.dispatchEvent(new CustomEvent(START_GROUP_CALL_EVENT, { detail: { conversationId: id, video: live.video, title: convo?.other_display_name ?? 'Group' } }))}
+                  className="btn btn-primary h-8 px-3 text-[12.5px] disabled:opacity-50">Join</button>
+        </div>
+      )}
 
       <div className={`min-h-0 flex-1 overflow-y-auto px-3 py-4 ${dock ? '' : 'md:px-5'}`}>
         {messages === null ? (
@@ -466,6 +546,7 @@ export function Thread({ id, me, convo, busRef, onBack, onChanged, dock }: {
             {messages.length === 0 && <p className="m-0 py-10 text-center text-[13.5px] text-ink-3">Say hi 👋</p>}
             {messages.map((m, i) => (
               <Bubble key={m.clientKey ?? m.id} m={m} mine={m.sender_id === me} animate={fresh.has(m.clientKey ?? m.id)} pending={Boolean(m.pending)} showTime={!messages[i - 1] || Date.parse(m.created_at) - Date.parse(messages[i - 1].created_at) > 10 * 60 * 1000}
+                      showSender={isGroup && m.sender_id !== me && (messages[i - 1]?.sender_id !== m.sender_id || messages[i - 1]?.kind !== 'text' || Date.parse(m.created_at) - Date.parse(messages[i - 1].created_at) > 10 * 60 * 1000)}
                       onUnsend={() => start(async () => {
                         const original = m;
                         setMessages((l) => l?.map((x) => (x.id === m.id ? { ...x, deleted_at: new Date().toISOString(), body: '', images: [] } : x)) ?? l); // optimistic
@@ -527,6 +608,13 @@ export function Thread({ id, me, convo, busRef, onBack, onChanged, dock }: {
         </div>
       )}
       {reporting && <ReportDialog targetType="message" targetId={reporting} onClose={() => setReporting(null)} />}
+      {isGroup && groupDialog === 'members' && (
+        <GroupMembersDialog id={id} me={me} members={members} myRole={convo?.my_role ?? null} onClose={() => setGroupDialog(null)}
+                            onChanged={() => { loadGroup(); onChanged(); }} onLeft={() => { setGroupDialog(null); onChanged(); if (dock) dock.onClose(); else onBack(); }} />
+      )}
+      {isGroup && groupDialog === 'rename' && convo && (
+        <RenameGroupDialog id={id} current={convo.other_display_name} onClose={() => setGroupDialog(null)} onChanged={onChanged} />
+      )}
       {viewing && (
         <Dialog open onClose={() => setViewing(null)} title="Photo" width={1000}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -541,8 +629,8 @@ function Dot({ d }: { d: number }) {
   return <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-3" style={{ animationDelay: `${d}ms` }} />;
 }
 
-function Bubble({ m, mine, showTime, animate, pending, onUnsend, onReport, onView }: {
-  m: ChatMessage; mine: boolean; showTime: boolean; animate: boolean; pending: boolean;
+function Bubble({ m, mine, showTime, showSender, animate, pending, onUnsend, onReport, onView }: {
+  m: ChatMessage; mine: boolean; showTime: boolean; showSender?: boolean; animate: boolean; pending: boolean;
   onUnsend: () => void; onReport: () => void; onView: (url: string) => void;
 }) {
   const [menu, setMenu] = useState(false);
@@ -561,14 +649,24 @@ function Bubble({ m, mine, showTime, animate, pending, onUnsend, onReport, onVie
   if (m.kind === 'call') {
     return (
       <p className={`m-0 my-1 inline-flex items-center gap-2 self-center rounded-full bg-surface-2 px-3.5 py-1.5 text-[12.5px] ${m.body.startsWith('Missed') || m.body.endsWith('declined') ? 'text-danger' : 'text-ink-2'} ${animate ? 'msg-in-theirs' : ''}`}>
-        <Icon name={m.body.startsWith('Video') ? 'video' : 'phoneCall'} size={13} />{m.body} · {timeAgo(m.created_at)}
+        <Icon name={/video/i.test(m.body) ? 'video' : 'phoneCall'} size={13} />{m.body} · {timeAgo(m.created_at)}
       </p>
     );
+  }
+  if (m.kind === 'system') {
+    // Group notices: "Ana added Ben", "Ben left the group".
+    return <p className={`m-0 my-1 self-center px-4 text-center text-[12.5px] text-ink-3 ${animate ? 'msg-in-theirs' : ''}`}>{m.body}</p>;
   }
   return (
     <div className={`group flex flex-col gap-1 transition-opacity duration-200 ${mine ? 'items-end' : 'items-start'} ${animate ? (mine ? 'msg-in-mine' : 'msg-in-theirs') : ''} ${pending ? 'opacity-60' : ''}`}
          aria-busy={pending || undefined}>
       {showTime && <span className="self-center py-2 text-[11.5px] text-ink-3">{timeAgo(m.created_at)}</span>}
+      {showSender && (
+        <span className="mt-1.5 flex items-center gap-1.5 pl-1 text-[12px] text-ink-3">
+          <Avatar name={m.sender?.display_name ?? 'Former member'} path={m.sender?.avatar_path} seed={m.sender?.username ?? m.sender_id} size={18} />
+          {m.sender?.display_name ?? 'Former member'}
+        </span>
+      )}
       <div className={`flex max-w-[80%] items-center gap-1 ${mine ? 'flex-row-reverse' : ''}`}>
         <div className={`flex min-w-0 flex-col gap-1 ${mine ? 'items-end' : 'items-start'}`}>
           {m.images.length > 0 && (

@@ -924,6 +924,125 @@ test('calls: friends only, one at a time, only the callee answers, summaries lan
   fails(await start(ana, ab), /can't call/);
 });
 
+test('group chats: friends only, admins manage, members only, notices, unread', async () => {
+  const [gia, hal, ivy, jon, kim, out] = await Promise.all(['gia', 'hal', 'ivy', 'jon', 'kim', 'out'].map((n) => createUser(db, { email: `grp-${n}@test.dev` })));
+  const befriend = async (a, b) => { ok(await as(db, a, `insert into public.follows (followee_id) values ($1)`, [b])); ok(await as(db, b, `insert into public.follows (followee_id) values ($1)`, [a])); };
+  for (const f of [hal, ivy, jon, kim]) await befriend(gia, f);
+  const create = (uid, title, members) => as(db, uid, `select public.create_group($1, $2::uuid[]) as id`, [title, members]);
+
+  fails(await create(gia, 'Crew', [hal]), /at least 2/, 'group of two');
+  fails(await create(gia, '   ', [hal, ivy]), /name/, 'blank name');
+  fails(await create(gia, 'Crew', [hal, out]), /only add your friends/, 'adding a stranger');
+  fails(await as(db, gia, `insert into public.conversations (kind, title) values ('group', 'x')`), /permission denied/, 'direct insert');
+  fails(await as(db, gia, `insert into public.group_members (conversation_id, user_id) values (gen_random_uuid(), $1)`, [gia]), /permission denied/);
+
+  const [{ id: g }] = ok(await create(gia, 'Crew', [hal, ivy, hal]));
+  const members = async (uid) => ok(await as(db, uid, `select user_id, role from public.group_members_of($1)`, [g]));
+  assert.equal((await members(hal)).length, 3, 'duplicates ignored');
+  none(await as(db, out, `select 1 from public.group_members_of($1)`, [g]), 'outsider lists members');
+  none(await as(db, out, `select 1 from public.conversations where id = $1`, [g]), 'outsider sees the group');
+  none(await as(db, out, `select 1 from public.messages where conversation_id = $1`, [g]), 'outsider reads the group');
+  fails(await as(db, out, `select public.send_message($1, 'hi')`, [g]), /not found/, 'outsider posts');
+
+  ok(await as(db, hal, `select public.send_message($1, 'hello crew')`, [g]));
+  const inbox = async (uid) => ok(await as(db, uid, `select id, kind, other_display_name, unread, member_count, my_role, last_sender_name from public.my_conversations()`)).find((c) => c.id === g);
+  const halName = (await sql(`select display_name from public.profiles where id = $1`, [hal]))[0].display_name;
+  const ivyRow = await inbox(ivy);
+  assert.deepEqual([ivyRow.kind, ivyRow.other_display_name, ivyRow.member_count, ivyRow.my_role, ivyRow.last_sender_name], ['group', 'Crew', 3, 'member', halName]);
+  assert.equal(ivyRow.unread, 2, 'the "started the group" notice and the first message');
+  ok(await as(db, ivy, `select public.mark_conversation_read($1)`, [g]));
+  assert.equal((await inbox(ivy)).unread, 0);
+  assert.equal((await inbox(hal)).unread, 0, 'sending marks the chat read');
+
+  // Only admins manage, and only their own friends can be added.
+  fails(await as(db, hal, `select public.add_group_members($1, $2::uuid[])`, [g, [jon]]), /Only group admins/);
+  fails(await as(db, hal, `select public.rename_group($1, 'Mine')`, [g]), /Only group admins/);
+  fails(await as(db, hal, `select public.remove_group_member($1, $2)`, [g, ivy]), /Only group admins/);
+  fails(await as(db, gia, `select public.add_group_members($1, $2::uuid[])`, [g, [out]]), /only add your friends/);
+  ok(await as(db, gia, `select public.add_group_members($1, $2::uuid[])`, [g, [jon]]));
+  ok(await as(db, gia, `select public.set_group_admin($1, $2, true)`, [g, hal]));
+  fails(await as(db, hal, `select public.set_group_admin($1, $2, false)`, [g, gia]), /stays an admin/, 'demoting the creator');
+  fails(await as(db, hal, `select public.remove_group_member($1, $2)`, [g, gia]), /can't be removed/, 'removing the creator');
+  ok(await as(db, gia, `select public.rename_group($1, 'Night crew')`, [g]));
+  ok(await as(db, hal, `select public.remove_group_member($1, $2)`, [g, jon]));
+  none(await as(db, jon, `select 1 from public.messages where conversation_id = $1`, [g]), 'a removed member loses access');
+  fails(await as(db, jon, `select public.send_message($1, 'still here?')`, [g]), /not found/);
+
+  // Size limit: 10 people.
+  const extra = await Promise.all([...Array(7)].map((_, i) => createUser(db, { email: `grp-x${i}@test.dev` })));
+  for (const x of extra) await befriend(gia, x);
+  fails(await as(db, gia, `select public.add_group_members($1, $2::uuid[])`, [g, [...extra, kim]]), /up to 10/);
+
+  // Notices can't be unsent.
+  const [notice] = await sql(`select id from public.messages where conversation_id = $1 and kind = 'system' limit 1`, [g]);
+  fails(await as(db, gia, `select public.delete_message($1)`, [notice.id]), /not found/, 'unsending a notice');
+
+  // The last admin leaving hands the group on.
+  ok(await as(db, gia, `select public.leave_group($1)`, [g]));
+  ok(await as(db, hal, `select public.leave_group($1)`, [g]));
+  assert.deepEqual((await members(ivy)).map((m) => m.role), ['admin'], 'the remaining member takes over as admin');
+  const notices = (await sql(`select body from public.messages where conversation_id = $1 and kind = 'system' order by created_at`, [g])).map((m) => m.body);
+  assert.ok(notices.some((n) => n.endsWith('named the group "Night crew"')) && notices.some((n) => n.endsWith(' left the group')), notices.join(' | '));
+});
+
+test('group calls: members only, ring, join up to 6, leave ends it, summaries land in the chat', async () => {
+  const people = await Promise.all([...Array(8)].map((_, i) => createUser(db, { email: `gcall-${i}@test.dev` })));
+  const [lead, ...rest] = people;
+  const out = await createUser(db, { email: 'gcall-out@test.dev' });
+  for (const p of rest) { ok(await as(db, lead, `insert into public.follows (followee_id) values ($1)`, [p])); ok(await as(db, p, `insert into public.follows (followee_id) values ($1)`, [lead])); }
+  const [{ id: g }] = ok(await as(db, lead, `select public.create_group('Call crew', $1::uuid[]) as id`, [rest]));
+  const start = (uid, video = false) => as(db, uid, `select public.start_group_call($1, $2) as id`, [g, video]);
+  const join = async (uid, c) => ok(await as(db, uid, `select public.join_group_call($1) as r`, [c]))[0].r;
+  const onChannel = async (uid, c) => ok(await as(db, uid, `select public.is_call_member($1) as m`, [c]))[0].m;
+
+  fails(await start(out), /Group not found/, 'outsider starts a call');
+  fails(await as(db, lead, `insert into public.calls (conversation_id, caller_id, video, is_group) values ($1, $2, false, true)`, [g, lead]), /permission denied/);
+  const [{ id: c }] = ok(await start(lead, true));
+  assert.equal(ok(await as(db, rest[0], `select id, is_group, group_title from public.my_incoming_call()`))[0].group_title, 'Call crew', 'members ring');
+  none(await as(db, out, `select 1 from public.calls where id = $1`, [c]), 'outsider sees the call');
+  none(await as(db, out, `select 1 from public.call_participants where call_id = $1`, [c]));
+  fails(await as(db, out, `select public.join_group_call($1)`, [c]), /not found/, 'outsider joins');
+  assert.equal(await onChannel(out, c), false, 'outsider on the signalling channel');
+  assert.equal(await onChannel(rest[0], c), false, 'only people who joined use the channel');
+
+  // A second Start joins the call that's already going.
+  const [{ id: again }] = ok(await start(rest[0]));
+  assert.equal(again, c, 'one call per group');
+  assert.equal(await onChannel(rest[0], c), true);
+  assert.equal((await sql(`select status from public.calls where id = $1`, [c]))[0].status, 'active');
+  for (const p of rest.slice(1, 5)) assert.equal(await join(p, c), 'joined');
+  assert.equal(await join(rest[5], c), 'full', 'a 7th person can\'t join');
+  ok(await as(db, rest[6], `select public.decline_group_call($1)`, [c]));
+  none(await as(db, rest[6], `select id from public.my_incoming_call()`), 'declining stops the ringing');
+  const dm = ok(await as(db, rest[0], `select public.start_conversation($1) as id`, [lead]))[0].id;
+  fails(await as(db, rest[0], `select public.start_call($1)`, [dm]), /already in a call/, '1-to-1 while in a group call');
+
+  // A browser that stops checking in is dropped.
+  await sql(`update public.call_participants set last_seen_at = now() - interval '2 minutes' where call_id = $1 and user_id = $2`, [c, rest[4]]);
+  const pulse = ok(await as(db, lead, `select public.group_call_pulse($1) as p`, [c]))[0].p;
+  assert.equal(pulse.participants.length, 5, 'the silent one is out');
+  assert.equal(ok(await as(db, out, `select public.group_call_pulse($1) as p`, [c]))[0].p, null, 'outsider pulse');
+
+  await sql(`update public.calls set answered_at = now() - interval '3 minutes' where id = $1`, [c]);
+  for (const p of [lead, ...rest.slice(0, 4)]) ok(await as(db, p, `select public.end_call($1)`, [c]));
+  assert.equal((await sql(`select status from public.calls where id = $1`, [c]))[0].status, 'ended', 'the last one out ends it');
+  const lastLog = async () => (await sql(`select body from public.messages where conversation_id = $1 and kind = 'call' order by created_at desc limit 1`, [g]))[0].body;
+  assert.equal(await lastLog(), 'Group video call · 3 min');
+
+  // Nobody joins: missed.
+  const [{ id: c2 }] = ok(await start(lead));
+  await sql(`update public.calls set created_at = now() - interval '1 minute' where id = $1`, [c2]);
+  assert.equal(await join(rest[0], c2), 'ended');
+  assert.equal(await lastLog(), 'Missed group call');
+  assert.equal((await sql(`select count(*)::int as n from public.call_participants where call_id = $1 and state in ('joined', 'ringing')`, [c2]))[0].n, 0);
+
+  // Leaving the group takes you out of its call.
+  const [{ id: c3 }] = ok(await start(lead));
+  assert.equal(await join(rest[0], c3), 'joined');
+  ok(await as(db, rest[0], `select public.leave_group($1)`, [g]));
+  assert.equal(await onChannel(rest[0], c3), false);
+});
+
 test('reports are private to the reporter and moderators', async () => {
   ok(await as(db, u.bob, `insert into public.reports (target_type, target_id, reason) values ('template', $1, 'broken')`, [s.tpl]));
   none(await as(db, u.alice, `select id from public.reports`));

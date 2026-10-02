@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { realtimeClient } from '@/lib/supabase/browser';
 import { listConversations, loadMessage, type ChatMessage, type Conversation } from '@/app/actions/messages';
 import { MESSAGES_EVENT } from '@/lib/events';
-import { Avatar } from './bits';
+import { ConvoAvatar } from './convo-avatar';
 import { Icon } from './icons';
 import { Thread, type ThreadBus } from './messenger';
 import { useMe } from './header-account';
@@ -49,7 +49,7 @@ export function ChatWindow({ id, minimized, onToggle, onClose }: { id: string; m
     return (
       <div className="pointer-events-auto flex w-[240px] items-center gap-2 rounded-t-xl bg-surface-1 px-3 py-2 shadow-e3 ring-1 ring-line">
         <button type="button" onClick={onToggle} className="flex min-w-0 flex-1 items-center gap-2 text-left" aria-label={`Open chat with ${convo?.other_display_name ?? 'contact'}`}>
-          {convo && <Avatar name={convo.other_display_name} path={convo.other_avatar_path} seed={convo.other_username} size={26} />}
+          {convo && <ConvoAvatar c={convo} size={26} />}
           <span className="truncate text-[13.5px] font-medium">{convo?.other_display_name ?? 'Chat'}</span>
           {convo && convo.unread > 0 && <span className="h-2 w-2 shrink-0 rounded-full bg-accent" aria-label="Unread" />}
         </button>
