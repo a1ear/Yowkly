@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>How Yowkly Works</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 18mm 16mm; }
+  :root { --ink: #1b1a17; --ink2: #4a4740; --ink3: #7a766c; --line: #e3dfd4; --accent: #c6f432; --accent-ink: #4f6b00; --soft: #f6f4ee; }
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", system-ui, -apple-system, sans-serif; color: var(--ink); font-size: 10.6pt; line-height: 1.55; margin: 0; }
+  h1 { font-family: Georgia, "Times New Roman", serif; font-weight: 400; font-size: 34pt; line-height: 1; margin: 0 0 6pt; letter-spacing: -0.02em; }
+  h2 { font-family: Georgia, serif; font-weight: 400; font-size: 19pt; margin: 22pt 0 6pt; letter-spacing: -0.01em; break-after: avoid; }
+  h3 { font-size: 11.5pt; margin: 14pt 0 3pt; break-after: avoid; }
+  p { margin: 0 0 7pt; }
+  ul, ol { margin: 0 0 8pt; padding-left: 16pt; }
+  li { margin: 0 0 3pt; }
+  .eyebrow { font: 600 8pt/1 ui-monospace, Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-ink); }
+  .lead { font-size: 12pt; color: var(--ink2); max-width: 150mm; }
+  .cover { padding: 30mm 0 10mm; border-bottom: 1px solid var(--line); margin-bottom: 8mm; }
+  .cover .tag { display: inline-block; background: var(--accent); color: #1b1a17; font-weight: 600; padding: 3pt 9pt; border-radius: 99pt; font-size: 9pt; margin-bottom: 14pt; }
+  .box { background: var(--soft); border: 1px solid var(--line); border-radius: 8pt; padding: 10pt 12pt; margin: 8pt 0 10pt; break-inside: avoid; }
+  .box strong { color: var(--ink); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8pt; margin: 8pt 0 10pt; }
+  .card { border: 1px solid var(--line); border-radius: 8pt; padding: 9pt 11pt; break-inside: avoid; }
+  .card h3 { margin-top: 0; }
+  .card .what { font-size: 9pt; color: var(--ink3); margin-bottom: 3pt; }
+  table { width: 100%; border-collapse: collapse; margin: 6pt 0 10pt; font-size: 9.6pt; break-inside: avoid; }
+  th, td { text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); padding: 5pt 6pt; }
+  th { font-weight: 600; color: var(--ink2); background: var(--soft); }
+  .steps { counter-reset: s; list-style: none; padding-left: 0; }
+  .steps li { counter-increment: s; position: relative; padding-left: 22pt; margin-bottom: 5pt; }
+  .steps li::before { content: counter(s); position: absolute; left: 0; top: 0; width: 15pt; height: 15pt; border-radius: 50%; background: var(--accent); font-size: 8pt; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .diagram { margin: 10pt 0 14pt; break-inside: avoid; }
+  .diagram svg { width: 100%; height: auto; }
+  .muted { color: var(--ink3); }
+  .page-break { break-before: page; }
+  .two-col { columns: 2; column-gap: 14pt; }
+  .two-col p, .two-col li { break-inside: avoid; }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: 9pt; background: var(--soft); padding: 0 3pt; border-radius: 3pt; }
+  footer.note { margin-top: 18pt; padding-top: 8pt; border-top: 1px solid var(--line); font-size: 8.5pt; color: var(--ink3); }
+</style>
+</head>
+<body>
+
+<section class="cover">
+  <span class="tag">Yowkly · by NightPatch</span>
+  <h1>How Yowkly works</h1>
+  <p class="lead">A plain-English guide to the whole system: what the pieces are, what each one does, and what actually happens when someone signs up, uploads a template, votes, posts or chats. No coding knowledge needed.</p>
+  <p class="muted" style="margin-top:14pt">Version of October 2026 · covers everything built so far</p>
+</section>
+
+<h2>1. The big picture</h2>
+<p>Yowkly is a website where developers and designers share templates, app designs and website showcases, vote for the best ones with <strong>yowkbits</strong>, and talk to each other in a community with posts, channels and chat.</p>
+<p>Behind the website are a handful of online services that each do one job. Think of Yowkly as a shop in a mall:</p>
+
+<div class="diagram">
+<svg viewBox="0 0 720 300" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, sans-serif">
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#7a766c"/></marker></defs>
+  <rect x="10" y="115" width="120" height="70" rx="10" fill="#f6f4ee" stroke="#e3dfd4"/>
+  <text x="70" y="145" text-anchor="middle" font-size="14" font-weight="600">Visitor</text>
+  <text x="70" y="164" text-anchor="middle" font-size="11" fill="#7a766c">phone or laptop</text>
+  <rect x="200" y="100" width="170" height="100" rx="10" fill="#c6f432" stroke="#9cbf1f"/>
+  <text x="285" y="137" text-anchor="middle" font-size="15" font-weight="700">Vercel</text>
+  <text x="285" y="157" text-anchor="middle" font-size="11">the website itself</text>
+  <text x="285" y="173" text-anchor="middle" font-size="11">(the shop front)</text>
+  <rect x="450" y="10" width="250" height="62" rx="10" fill="#f6f4ee" stroke="#e3dfd4"/>
+  <text x="575" y="36" text-anchor="middle" font-size="13" font-weight="600">Supabase</text>
+  <text x="575" y="55" text-anchor="middle" font-size="10.5" fill="#4a4740">database, logins, live chat (the vault + guard)</text>
+  <rect x="450" y="86" width="250" height="62" rx="10" fill="#f6f4ee" stroke="#e3dfd4"/>
+  <text x="575" y="112" text-anchor="middle" font-size="13" font-weight="600">Cloudflare R2</text>
+  <text x="575" y="131" text-anchor="middle" font-size="10.5" fill="#4a4740">all files and images (the warehouse)</text>
+  <rect x="450" y="162" width="250" height="62" rx="10" fill="#f6f4ee" stroke="#e3dfd4"/>
+  <text x="575" y="188" text-anchor="middle" font-size="13" font-weight="600">GitHub Actions</text>
+  <text x="575" y="207" text-anchor="middle" font-size="10.5" fill="#4a4740">virus scanner (the inspection room)</text>
+  <rect x="450" y="238" width="250" height="52" rx="10" fill="#f6f4ee" stroke="#e3dfd4"/>
+  <text x="575" y="261" text-anchor="middle" font-size="13" font-weight="600">Upstash</text>
+  <text x="575" y="278" text-anchor="middle" font-size="10.5" fill="#4a4740">speed limits (the turnstile counter)</text>
+  <line x1="130" y1="150" x2="198" y2="150" stroke="#7a766c" stroke-width="2" marker-end="url(#a)"/>
+  <line x1="370" y1="130" x2="448" y2="45" stroke="#7a766c" stroke-width="2" marker-end="url(#a)"/>
+  <line x1="370" y1="145" x2="448" y2="117" stroke="#7a766c" stroke-width="2" marker-end="url(#a)"/>
+  <line x1="370" y1="165" x2="448" y2="262" stroke="#7a766c" stroke-width="2" marker-end="url(#a)"/>
+  <line x1="575" y1="148" x2="575" y2="160" stroke="#7a766c" stroke-width="2" marker-end="url(#a)"/>
+  <text x="602" y="157" font-size="9.5" fill="#7a766c">checks new files</text>
+</svg>
+</div>
+
+<div class="grid2">
+  <div class="card"><div class="what">The shop front</div><h3>Vercel</h3><p>Hosts the website (<code>yowkly.vercel.app</code>). It builds the pages people see and runs the small "server actions" that happen when someone clicks a button, like voting or posting. Every time new code is pushed to GitHub, Vercel rebuilds the site by itself.</p></div>
+  <div class="card"><div class="what">The vault and the security guard</div><h3>Supabase</h3><p>Holds all the information: accounts, templates, votes, posts, chats, channels. It also handles logins (email and Google) and the live updates that make chat instant. Most importantly, it stores <strong>the rules</strong> for who may see and change what.</p></div>
+  <div class="card"><div class="what">The warehouse</div><h3>Cloudflare R2</h3><p>Stores the actual files: template downloads, cover images, post photos and chat photos. Three areas: a <em>quarantine</em> for new uploads, a <em>private</em> area for scanned files and chat photos, and a <em>public</em> area for images everyone can see.</p></div>
+  <div class="card"><div class="what">The inspection room</div><h3>GitHub Actions</h3><p>Runs the virus scanner (ClamAV). When someone uploads a template file, the scanner checks it before anyone else can download it. Infected or broken files are rejected and deleted.</p></div>
+  <div class="card"><div class="what">The turnstile counter</div><h3>Upstash</h3><p>Counts how often each person does things (sign-in attempts, posts, likes) so nobody can hammer the site. If someone goes too fast, they're asked to slow down.</p></div>
+  <div class="card"><div class="what">Where the code lives</div><h3>GitHub</h3><p>Keeps every version of the code and the database changes ("migrations"). Pushing to GitHub triggers Vercel to update the live site.</p></div>
+</div>
+
+<div class="box"><strong>The one idea that matters most:</strong> the website never decides on its own whether something is allowed. Every rule ("only the owner can edit this", "you can't vote on your own template", "only friends can chat freely") is written into the <strong>database</strong>. So even if someone tampers with the website in their browser, the database still says no. This is called <em>row-level security</em>.</div>
+
+<h2 class="page-break">2. What happens when…</h2>
+
+<h3>…someone signs up</h3>
+<ol class="steps">
+  <li>They enter an email and password (or press Google). Supabase creates the account and gives them <strong>100 yowkbits</strong>.</li>
+  <li>An email arrives with a <strong>Confirm my email</strong> button. It opens a page on Yowkly; one click confirms the account. (The button page protects against email scanners using up the link.)</li>
+  <li>They pick a few interests, which shape their <em>For You</em> feed. They can change these later in Settings.</li>
+</ol>
+
+<h3>…someone uploads a template</h3>
+<ol class="steps">
+  <li><strong>Basics:</strong> title, tagline, description, category and at least one tag (all required).</li>
+  <li><strong>Source:</strong> files (ZIP, Figma, PSD and others), links (GitHub, Figma, Canva…) and an optional live demo. The demo must be the creator's own site; Google, Facebook, YouTube and link shorteners are refused.</li>
+  <li>Files go straight from the browser into the <strong>quarantine</strong> area. The scanner checks them within minutes. Clean files move to the private area; bad ones are deleted and the creator is told why.</li>
+  <li><strong>Media:</strong> a cover image and gallery, each cropped in the browser and shrunk before upload so pages stay fast.</li>
+  <li><strong>License</strong> and version, then <strong>Publish</strong>. A brand-new creator's first two uploads wait for a moderator's approval; after that, they publish straight away.</li>
+</ol>
+<p><strong>Inspo</strong> works the same way but is a showcase: no files or download links at all, just screenshots and a "Visit the live site" button.</p>
+
+<h3>…someone downloads</h3>
+<p>They must be signed in and accept the template's license. The site then hands them a download link that works for only one minute, so links can't be shared around. Each download is recorded once a day per person.</p>
+
+<h3>…someone votes</h3>
+<p>A vote costs 1 yowkbit, one vote per template, and votes are final. You can't vote on your own work, and accounts newer than 24 hours can't vote (stops throwaway accounts). Votes decide the <strong>Ranking</strong>: Template of the Day, Week and Month, and Dev of the Week. Likes are separate and free; they don't affect the Ranking.</p>
+
+<h2>3. The community</h2>
+<div class="two-col">
+  <p><strong>Posts.</strong> Anyone signed in can post text, up to 4 photos and up to 5 tags. Others can like or dislike (one each), comment, and like or dislike comments. The best one or two comments show under each post. Authors can edit or delete their own posts from the ⋮ menu.</p>
+  <p><strong>Channels.</strong> Topic spaces anyone can create (up to 5). The creator is the <em>owner</em> and can make members <em>moderators</em>. Owners and moderators can remove posts, kick people, and ban them with a reason. Every action goes into the channel's own mod log. You must join a channel to post in it.</p>
+  <p><strong>Friends.</strong> A friend is someone you follow who follows you back. Your friends list is private unless you make it public in Settings.</p>
+  <p><strong>Activity status.</strong> Online, Idle or Appear offline, chosen from your account menu. The site also notices if you've gone quiet (idle after 10 minutes, offline after 3 minutes away). Only friends ever see your status.</p>
+  <p><strong>Chat.</strong> Friends can message each other freely. Anyone else lands in your <em>Requests</em>; they can send up to 3 messages until you accept, decline or block. Messages arrive instantly, with typing dots, from the Messages page or a floating chat box. Chat photos are kept private and shown through links that expire after an hour.</p>
+  <p><strong>Notifications.</strong> Follows, comments, approvals, rankings and scan results appear in the bell popup, with the person's profile picture.</p>
+</div>
+
+<h2>4. Keeping it safe</h2>
+<table>
+  <tr><th style="width:28%">Risk</th><th>What stops it</th></tr>
+  <tr><td>Someone edits another person's template, post or chat</td><td>The database only lets owners change their own things (row-level security), no matter what the browser sends.</td></tr>
+  <tr><td>Viruses in uploaded files</td><td>Every file waits in quarantine until the virus scanner clears it. Nobody can download an unscanned file.</td></tr>
+  <tr><td>Spam and abuse</td><td>Speed limits (Upstash) plus daily caps in the database: posts, comments, messages, requests and photos. Message requests limit strangers to 3 messages.</td></tr>
+  <tr><td>Harmful content</td><td>Anyone can <strong>Report</strong> a template, post, comment or message. Moderators see reports in the Admin panel and can remove content. Admins can suspend accounts.</td></tr>
+  <tr><td>Fake "images" that are really code</td><td>Chat photos are checked byte by byte on the server; SVG images (which can carry code) are refused everywhere.</td></tr>
+  <tr><td>Private photos leaking</td><td>Chat photos live in the private storage area and are only shown through links that expire, and only to the two people in the chat.</td></tr>
+  <tr><td>Rewriting history</td><td>Published template versions, votes and audit logs can't be edited. Deleted posts are hidden, not erased, so reports can still be judged.</td></tr>
+</table>
+
+<h3>Who can do what</h3>
+<table>
+  <tr><th style="width:20%">Role</th><th>Can do</th></tr>
+  <tr><td><strong>Member</strong></td><td>Upload, vote, post, comment, chat, create channels.</td></tr>
+  <tr><td><strong>Sub-admin</strong></td><td>Approve uploads or ask for changes. Chosen by an admin from their friends.</td></tr>
+  <tr><td><strong>Moderator</strong></td><td>Everything a sub-admin can, plus handle reports and remove content anywhere.</td></tr>
+  <tr><td><strong>Admin</strong></td><td>Everything, plus the user directory, making moderators, trusting creators (skip review) and suspending accounts. Every admin action is logged.</td></tr>
+</table>
+
+<h2 class="page-break">5. Speed</h2>
+<ul>
+  <li><strong>Caching:</strong> public pages (templates, profiles, the feed) are saved and reused for up to a minute, so most visits never touch the database. When something changes, that page is refreshed straight away for its owner.</li>
+  <li><strong>Small images:</strong> every image is cropped and shrunk in the person's own browser before it's uploaded. A 6 MB photo usually becomes 100–300 KB.</li>
+  <li><strong>Only load what's needed:</strong> the live-chat code (the heaviest part) only loads when a chat is actually opened.</li>
+</ul>
+
+<h2>6. What you look after</h2>
+<table>
+  <tr><th style="width:30%">Task</th><th>How</th></tr>
+  <tr><td>Update the live database after changes</td><td>When an update adds files in <code>supabase/migrations</code>, run <code>npx supabase db push</code> once. The website updates by itself; the database needs this command.</td></tr>
+  <tr><td>Approve uploads and handle reports</td><td>Sign in as an admin and use the shield button in the header (Admin panel).</td></tr>
+  <tr><td>Secrets and settings</td><td>Stored in Vercel (website) and GitHub (scanner) settings, never in the code. The database master key is never put in Vercel.</td></tr>
+  <tr><td>Run it on your own computer</td><td>Docker Desktop must be running; then the local database starts with <code>npx supabase start</code> and the site with <code>npm run dev</code>.</td></tr>
+  <tr><td>Backups</td><td>Supabase keeps daily backups of the database. Files in R2 are kept until deleted.</td></tr>
+</table>
+
+<h3>Free-tier limits worth knowing</h3>
+<table>
+  <tr><th>Service</th><th>Free limit</th><th>What happens past it</th></tr>
+  <tr><td>Supabase database</td><td>500 MB data, 50,000 monthly active users</td><td>Upgrade to the paid plan.</td></tr>
+  <tr><td>Supabase live chat</td><td>200 people connected at once, 2 million live messages a month</td><td>Messages still arrive, but on refresh instead of instantly.</td></tr>
+  <tr><td>Cloudflare R2</td><td>10 GB storage, no download fees</td><td>Small per-GB charge.</td></tr>
+  <tr><td>Vercel</td><td>Hobby plan bandwidth and function time</td><td>Upgrade to Pro.</td></tr>
+  <tr><td>GitHub Actions</td><td>Free minutes for the scanner</td><td>Scans wait for the next hourly run.</td></tr>
+</table>
+
+<h2>7. Words you'll hear</h2>
+<div class="two-col">
+  <p><strong>Database:</strong> the organised store of all the site's information.</p>
+  <p><strong>Migration:</strong> a saved change to the database's structure (a new table, a new rule). Applied with <code>db push</code>.</p>
+  <p><strong>Row-level security (RLS):</strong> rules inside the database deciding who can see or change each row. The main safety net.</p>
+  <p><strong>Server action:</strong> a small piece of code that runs on Vercel when someone clicks a button.</p>
+  <p><strong>Realtime:</strong> the Supabase feature that pushes new chat messages to the screen instantly.</p>
+  <p><strong>Bucket:</strong> a storage area in R2 (quarantine, private files, public media).</p>
+  <p><strong>Cache:</strong> a saved copy of a page reused for a short time so the site stays fast.</p>
+  <p><strong>Rate limit:</strong> a cap on how often someone can do something.</p>
+  <p><strong>Yowkbits:</strong> the voting currency. Everyone starts with 100; one vote costs one.</p>
+  <p><strong>Environment variables:</strong> the site's private settings (keys, addresses), kept in Vercel and GitHub, not in the code.</p>
+</div>
+
+<footer class="note">Yowkly by NightPatch · "For Devs by Devs" · This guide describes the system as built in October 2026. Technical details live in the repository (README, docs/OPERATIONS.md and the files in supabase/migrations).</footer>
+</body>
+</html>
