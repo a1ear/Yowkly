@@ -6,20 +6,20 @@ import { Avatar } from './bits';
 import { Icon } from './icons';
 import { STATUS_LABEL, StatusDot } from './presence';
 import { useMe } from './header-account';
+import { revalidate, useCached } from '@/lib/use-cached';
 import { MessageButton } from './message-button';
 
 /** Community sidebar: your friends with their status, refreshed every minute. */
 export function FriendsSidebar() {
   const me = useMe();
-  const [friends, setFriends] = useState<Friend[] | null>(null);
+  // Cached: switching pages shows your friends instantly; statuses refresh every minute.
+  const cached = useCached(me ? 'friends' : null, myFriends, 60_000);
+  const friends = cached === undefined ? null : (cached ?? []);
 
   useEffect(() => {
     if (!me) return;
-    let live = true;
-    const load = () => myFriends().then((f) => { if (live) setFriends(f ?? []); });
-    load();
-    const id = setInterval(() => { if (document.visibilityState === 'visible') load(); }, 60_000);
-    return () => { live = false; clearInterval(id); };
+    const id = setInterval(() => { if (document.visibilityState === 'visible') revalidate('friends', myFriends); }, 60_000);
+    return () => clearInterval(id);
   }, [me]);
 
   if (me === null) {

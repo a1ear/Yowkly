@@ -386,15 +386,24 @@ export function VoteModule({ voteCount }: { voteCount: number }) {
   const [pending, start] = useTransition();
 
   const vote = () => start(async () => {
-    const r = await castVote(templateId);
+    // Optimistic: count the vote and spend the yowkbit on screen now; undo if the server refuses.
+    const before = { count, state };
     setConfirming(false);
+    setCount((n) => n + 1);
+    setSpent((n) => n + 1);
+    const guess = Math.max(0, (state?.balance ?? 1) - 1);
+    set((s) => ({ ...s, vote: { created_at: new Date().toISOString() }, balance: guess, eligibility: 'voted' }));
+    window.dispatchEvent(new CustomEvent(YOWKBITS_EVENT, { detail: guess }));
+    const r = await castVote(templateId);
     if (!r.ok) {
-      if (r.code === 'voted' || r.code === 'no_bits') set((s) => ({ ...s, eligibility: r.code as ViewerState['eligibility'] }));
+      setCount(before.count);
+      set((s) => ({ ...s, vote: before.state?.vote ?? null, balance: before.state?.balance ?? s.balance,
+                     eligibility: r.code === 'voted' || r.code === 'no_bits' ? (r.code as ViewerState['eligibility']) : (before.state?.eligibility ?? s.eligibility) }));
+      if (typeof before.state?.balance === 'number') window.dispatchEvent(new CustomEvent(YOWKBITS_EVENT, { detail: before.state.balance }));
       return toast({ text: r.error, tone: 'error' });
     }
     setCount(r.data.voteCount);
-    setSpent((n) => n + 1);
-    set((s) => ({ ...s, vote: { created_at: new Date().toISOString() }, balance: r.data.balance, eligibility: 'voted' }));
+    set((s) => ({ ...s, balance: r.data.balance }));
     window.dispatchEvent(new CustomEvent(YOWKBITS_EVENT, { detail: r.data.balance }));
     toast({ text: `Vote cast. ${r.data.balance} yowkbit${r.data.balance === 1 ? '' : 's'} left.`, tone: 'ok' });
   });

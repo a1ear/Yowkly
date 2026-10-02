@@ -5,6 +5,7 @@ import { loadNotifications, markAllNotificationsRead, type NotificationItem } fr
 import { Icon, type IconName } from './icons';
 import { Avatar } from './bits';
 import { timeAgo } from '@/lib/format';
+import { revalidate, useCached } from '@/lib/use-cached';
 
 function describe(n: NotificationItem, close: () => void): [IconName, React.ReactNode, string | null] {
   const who = n.actor ? <Link href={`/@${n.actor.username}`} onClick={close} className="font-semibold hover:text-accent-ink">{n.actor.display_name}</Link> : 'Someone';
@@ -32,7 +33,9 @@ function describe(n: NotificationItem, close: () => void): [IconName, React.Reac
  */
 export function NotificationsBell({ unread, onRead }: { unread: number; onRead: () => void }) {
   const [open, setOpen] = useState(false);
-  const [items, setItems] = useState<NotificationItem[] | null>(null);
+  // Cached: reopening the popup shows the last list instantly while it refreshes.
+  const cached = useCached<NotificationItem[] | null>(open ? 'notifications' : null, loadNotifications, 5_000);
+  const items = cached === undefined ? null : (cached ?? []);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -48,11 +51,11 @@ export function NotificationsBell({ unread, onRead }: { unread: number; onRead: 
     const next = !open;
     setOpen(next);
     if (!next) return;
-    const list = await loadNotifications();
-    setItems(list ?? []);
+    // Clear the badge straight away (optimistic); if marking read fails, the next header refresh shows the real count.
+    onRead();
+    const list = await revalidate('notifications', loadNotifications);
     if (list?.some((n) => !n.read_at)) {
-      const r = await markAllNotificationsRead();
-      if (r.ok) onRead();
+      await markAllNotificationsRead();
     }
   };
   const close = () => setOpen(false);

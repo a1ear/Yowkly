@@ -7,6 +7,7 @@ import { Avatar } from './bits';
 import { Icon } from './icons';
 import { openChat } from './chat-dock';
 import { timeAgo } from '@/lib/format';
+import { useCached } from '@/lib/use-cached';
 
 /**
  * The chat icon and its popup (like notifications): your latest conversations.
@@ -16,7 +17,9 @@ import { timeAgo } from '@/lib/format';
 export function MessagesBell({ unread }: { unread: number }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [list, setList] = useState<Conversation[] | null>(null);
+  // Cached: reopening shows the last list instantly while it refreshes.
+  const cached = useCached<Conversation[] | null>(open ? 'conversations' : null, listConversations, 5_000);
+  const list = cached === undefined ? null : (cached ?? []);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -28,11 +31,7 @@ export function MessagesBell({ unread }: { unread: number }) {
     return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
   }, [open]);
 
-  const toggle = async () => {
-    const next = !open;
-    setOpen(next);
-    if (next) setList((await listConversations()) ?? []);
-  };
+  const toggle = () => setOpen((v) => !v);
   const go = (id: string) => { setOpen(false); router.push(`/messages?c=${id}`); };
 
   const chats = (list ?? []).filter((c) => !c.incoming_request).slice(0, 8);

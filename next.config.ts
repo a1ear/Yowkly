@@ -35,6 +35,12 @@ const csp = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  experimental: {
+    // Client-side page cache: a page you opened in the last 30 s (or a prefetched
+    // static one in the last 5 min) shows instantly instead of waiting on the server.
+    // Actions that change data refresh the affected pages, so this never hides your own edits.
+    staleTimes: { dynamic: 30, static: 300 },
+  },
   async redirects() {
     return [
       { source: '/awards', destination: '/ranking', permanent: true },

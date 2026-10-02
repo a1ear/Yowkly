@@ -11,6 +11,7 @@ import { ReportDialog } from './template/panels';
 import { useMe } from './header-account';
 import { useToast } from './toast';
 import { formatCompact, timeAgo } from '@/lib/format';
+import { POST_DRAFT_EVENT } from '@/lib/events';
 import type { Post, PostComment } from '@/lib/data/posts';
 
 const MAX = 1500;
@@ -52,9 +53,25 @@ export function PostComposer({ onlyFor, channel }: { onlyFor?: string; channel?:
     const ready = images.filter((i) => i.state === 'ready' && i.path);
     if (!String(data.get('body') ?? '').trim() && !ready.length) return setError('Write something or add an image first.');
     data.set('images', JSON.stringify(ready.map((i) => ({ path: i.path, alt: i.alt.trim() || undefined, width: i.width, height: i.height }))));
+    // Optimistic: show the post in the feed right away (faded) and close the popup.
+    const draftId = `draft-${crypto.randomUUID()}`;
+    const tags = String(data.get('tags') ?? '').split(/[\s,]+/).map((t) => t.replace(/^#+/, '').toLowerCase()).filter(Boolean).slice(0, 5);
+    const draft: Post = {
+      id: draftId, body: String(data.get('body') ?? '').trim(), tags, like_count: 0, dislike_count: 0, comment_count: 0,
+      created_at: new Date().toISOString(), edited_at: null, author_id: me.id, author_username: me.username,
+      author_display_name: me.display_name, author_avatar_path: me.avatar_path, previews: [], images: [],
+      channel_id: channel?.id ?? null, channel_slug: null, channel_name: channel?.name ?? null,
+    };
+    window.dispatchEvent(new CustomEvent(POST_DRAFT_EVENT, { detail: { type: 'add', post: draft } }));
+    setOpen(false);
     start(async () => {
       const r = await createPost(null, data);
-      if (r?.error) return setError(r.error);
+      if (r?.error) {
+        window.dispatchEvent(new CustomEvent(POST_DRAFT_EVENT, { detail: { type: 'failed', id: draftId } }));
+        setOpen(true); // the form still holds what they wrote
+        return setError(r.error);
+      }
+      window.dispatchEvent(new CustomEvent(POST_DRAFT_EVENT, { detail: { type: 'saved', id: draftId } }));
       formRef.current?.reset();
       for (const i of images) URL.revokeObjectURL(i.preview);
       setImages([]);
@@ -122,13 +139,41 @@ const bestTwo = (list: PostComment[]) =>
   [...list].sort((a, b) => (b.like_count - b.dislike_count) - (a.like_count - a.dislike_count) || b.created_at.localeCompare(a.created_at)).slice(0, 2);
 
 /** A list of posts, each with like, dislike, comments, a report link and (on your own) delete. */
-export function PostList({ posts, emptyText, canModerate = false }: { posts: Post[]; emptyText: string; canModerate?: boolean }) {
+export function PostList({ posts, emptyText, canModerate = false, drafts = 'all' }: {
+  posts: Post[]; emptyText: string; canModerate?: boolean;
+  /** Which optimistic drafts belong in this list: every new post, one channel's, one author's, or none. */
+  drafts?: 'all' | 'none' | { channelId: string } | { authorId: string };
+}) {
   const [me, setMe] = useState<string | null>(null);
   const [mine, setMine] = useState<Record<string, Kind>>({});
   const [counts, setCounts] = useState<Record<string, Counts>>({});
   const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const [pendingPosts, setPendingPosts] = useState<(Post & { saved?: boolean })[]>([]);
   const toast = useToast();
   const ids = posts.map((p) => p.id).join(',');
+  const draftsKey = typeof drafts === 'string' ? drafts : JSON.stringify(drafts);
+
+  // Optimistic posts from the composer.
+  useEffect(() => {
+    const rule = typeof drafts === 'string' ? drafts : drafts;
+    const accepts = (p: Post) => rule === 'all' || (rule !== 'none' && ('channelId' in rule ? p.channel_id === rule.channelId : p.author_id === rule.authorId));
+    const onDraft = (e: Event) => {
+      const d = (e as CustomEvent).detail as { type: 'add'; post: Post } | { type: 'saved' | 'failed'; id: string };
+      if (d.type === 'add') { if (accepts(d.post)) setPendingPosts((l) => [d.post, ...l]); }
+      else if (d.type === 'failed') setPendingPosts((l) => l.filter((p) => p.id !== d.id));
+      else setPendingPosts((l) => l.map((p) => (p.id === d.id ? { ...p, saved: true } : p)));
+    };
+    window.addEventListener(POST_DRAFT_EVENT, onDraft);
+    return () => window.removeEventListener(POST_DRAFT_EVENT, onDraft);
+    // drafts is described by draftsKey
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftsKey]);
+  // When the refreshed feed arrives, the saved drafts are in it: drop them.
+  const [seenIds, setSeenIds] = useState(ids);
+  if (seenIds !== ids) {
+    setSeenIds(ids);
+    setPendingPosts((l) => l.filter((p) => !p.saved));
+  }
 
   useEffect(() => {
     let live = true;
@@ -153,14 +198,21 @@ export function PostList({ posts, emptyText, canModerate = false }: { posts: Pos
     });
   };
 
-  const visible = posts.filter((p) => !hidden.has(p.id));
+  const visible = [...pendingPosts, ...posts.filter((p) => !hidden.has(p.id))];
   if (!visible.length) return <p className="m-0 rounded-xl border border-dashed border-line px-6 py-12 text-center text-ink-2">{emptyText}</p>;
   return (
     <ul className="m-0 flex list-none flex-col gap-4 p-0">
       {visible.map((p) => (
         <li key={p.id}>
-          <PostItem post={p} me={me} canModerate={canModerate} reaction={mine[p.id]} counts={countsOf(p)} onReact={(k) => react(p, k)}
-                    onDeleted={() => setHidden((s) => new Set(s).add(p.id))} />
+          {p.id.startsWith('draft-') ? (
+            <div className="pointer-events-none opacity-60 transition-opacity" aria-busy="true">
+              <PostItem post={p} me={null} canModerate={false} reaction={undefined} counts={{ like: 0, dislike: 0 }} onReact={() => {}} onDeleted={() => {}} onRestore={() => {}} draft />
+            </div>
+          ) : (
+            <PostItem post={p} me={me} canModerate={canModerate} reaction={mine[p.id]} counts={countsOf(p)} onReact={(k) => react(p, k)}
+                      onDeleted={() => setHidden((s) => new Set(s).add(p.id))}
+                      onRestore={() => setHidden((s) => { const n = new Set(s); n.delete(p.id); return n; })} />
+          )}
         </li>
       ))}
     </ul>
@@ -178,8 +230,9 @@ function ReactionButton({ kind, active, count, onClick }: { kind: Kind; active: 
   );
 }
 
-function PostItem({ post, me, canModerate, reaction, counts, onReact, onDeleted }: {
-  post: Post; me: string | null; canModerate: boolean; reaction: Kind | undefined; counts: Counts; onReact: (k: Kind) => void; onDeleted: () => void;
+function PostItem({ post, me, canModerate, reaction, counts, onReact, onDeleted, onRestore, draft = false }: {
+  post: Post; me: string | null; canModerate: boolean; reaction: Kind | undefined; counts: Counts; onReact: (k: Kind) => void;
+  onDeleted: () => void; onRestore: () => void; draft?: boolean;
 }) {
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -208,15 +261,15 @@ function PostItem({ post, me, canModerate, reaction, counts, onReact, onDeleted 
   }, [menu]);
 
   const remove = () => start(async () => {
+    onDeleted(); // optimistic
     const r = await deletePost(post.id);
-    if (!r.ok) return toast({ text: r.error, tone: 'error' });
-    onDeleted();
+    if (!r.ok) { onRestore(); return toast({ text: r.error, tone: 'error' }); }
     toast({ text: 'Post deleted.', tone: 'ok' });
   });
   const modRemove = () => start(async () => {
+    onDeleted(); // optimistic
     const r = await deletePost(post.id, reason);
-    if (!r.ok) return toast({ text: r.error, tone: 'error' });
-    onDeleted();
+    if (!r.ok) { onRestore(); return toast({ text: r.error, tone: 'error' }); }
     toast({ text: 'Post removed from the channel.', tone: 'ok' });
   });
 
@@ -233,7 +286,7 @@ function PostItem({ post, me, canModerate, reaction, counts, onReact, onDeleted 
             {post.channel_slug && <> · in <Link href={`/community/c/${post.channel_slug}`} className="font-medium text-ink-2 hover:text-accent-ink">{post.channel_name}</Link></>}
           </span>
         </div>
-        <div ref={menuRef} className="relative">
+        {draft ? <span className="text-[12px] text-ink-3">Posting…</span> : <div ref={menuRef} className="relative">
           <button type="button" onClick={() => setMenu((v) => !v)} aria-label="Post options" aria-haspopup="menu" aria-expanded={menu}
                   className="inline-flex h-10 w-10 items-center justify-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink">
             <Icon name="kebab" size={18} />
@@ -267,7 +320,7 @@ function PostItem({ post, me, canModerate, reaction, counts, onReact, onDeleted 
               )}
             </div>
           )}
-        </div>
+        </div>}
       </header>
       {removing && (
         <div role="alertdialog" aria-label="Remove this post?" className="flex flex-wrap items-center gap-2 rounded-lg bg-surface-2 px-3 py-2 text-sm">
@@ -316,7 +369,7 @@ function PostItem({ post, me, canModerate, reaction, counts, onReact, onDeleted 
         <div className="flex flex-col gap-2 border-t border-line pt-3">
           <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Top comments">
             {previews.map((c) => (
-              <li key={c.id} className="flex gap-2.5">
+              <li key={c.id} className={`flex gap-2.5 transition-opacity ${c.id.startsWith('temp-') ? 'opacity-60' : ''}`}>
                 <Link href={`/@${c.author_username}`} aria-label={`${c.author_display_name}'s profile`} className="mt-0.5 shrink-0">
                   <Avatar name={c.author_display_name} path={c.author_avatar_path} seed={c.author_username} size={28} />
                 </Link>
@@ -362,6 +415,7 @@ function PostComments({ postId, postAuthorId, me, onCount, onList }: {
   const pathname = usePathname();
   const [comments, setComments] = useState<PostComment[] | null>(null);
   const [mine, setMine] = useState<Record<string, Kind>>({});
+  const meProfile = useMe();
   const [text, setText] = useState('');
   const [pending, start] = useTransition();
   const [reporting, setReporting] = useState<string | null>(null);
@@ -399,19 +453,34 @@ function PostComments({ postId, postAuthorId, me, onCount, onList }: {
     e.preventDefault();
     const body = text.trim();
     if (!body) return;
+    // Optimistic: show it now, faded, and swap in the saved one when the server answers.
+    const tempId = `temp-${crypto.randomUUID()}`;
+    const temp: PostComment = {
+      id: tempId, post_id: postId, body, created_at: new Date().toISOString(), author_id: me ?? '',
+      author_username: meProfile?.username ?? '', author_display_name: meProfile?.display_name ?? 'You',
+      author_avatar_path: meProfile?.avatar_path ?? null, like_count: 0, dislike_count: 0,
+    };
+    const before = comments ?? [];
+    update([...before, temp]);
+    setText('');
+    onCount(1);
     start(async () => {
       const r = await addPostComment(postId, body);
-      if (!r.ok) return toast({ text: r.error, tone: 'error' });
-      update([...(comments ?? []), r.data]);
-      setText('');
-      onCount(1);
+      if (!r.ok) {
+        setComments((list) => (list ?? []).filter((x) => x.id !== tempId));
+        setText(body);
+        onCount(-1);
+        return toast({ text: r.error, tone: 'error' });
+      }
+      setComments((list) => (list ?? []).map((x) => (x.id === tempId ? r.data : x)));
     });
   };
   const remove = (c: PostComment) => start(async () => {
-    const r = await removePostComment(c.id);
-    if (!r.ok) return toast({ text: r.error, tone: 'error' });
-    update((comments ?? []).filter((x) => x.id !== c.id));
+    const before = comments ?? [];
+    update(before.filter((x) => x.id !== c.id)); // optimistic
     onCount(-1);
+    const r = await removePostComment(c.id);
+    if (!r.ok) { update(before); onCount(1); return toast({ text: r.error, tone: 'error' }); }
   });
 
   return (

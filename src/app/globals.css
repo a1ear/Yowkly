@@ -116,12 +116,19 @@
 
   .card-hover { @apply transition-[transform,box-shadow] duration-200 ease-out hover:-translate-y-1 hover:shadow-e1; }
 
-  .skeleton { @apply animate-pulse rounded-md bg-surface-2; }
+  /* Gray placeholder bars with a soft light sweep while content loads. */
+  .skeleton {
+    @apply rounded-md;
+    background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 40%, var(--surface-2) 80%) 0 0 / 300% 100%;
+    animation: skeleton-sweep 1.4s ease-in-out infinite;
+  }
 }
 
 /* ── Motion ─────────────────────────────────────────────────────────────
    CSS only (no JS, no library). Everything here is switched off by the
    prefers-reduced-motion block at the end of the file. */
+@keyframes skeleton-sweep { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@keyframes tooltip-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes word-rise {
@@ -162,6 +169,7 @@
   .hero-zoom { animation: hero-zoom 1.8s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
   .pulse-dot { animation: pulse-dot 2.2s ease-in-out infinite; }
   .icon-swap { animation: icon-swap 0.25s ease-out; }
+  .tooltip-in { animation: tooltip-in 0.12s ease-out both; }
   .msg-in-mine { transform-origin: bottom right; animation: msg-in-right 0.32s cubic-bezier(0.2, 0.9, 0.25, 1.15) both; }
   .msg-in-theirs { transform-origin: bottom left; animation: msg-in-left 0.32s cubic-bezier(0.2, 0.9, 0.25, 1.15) both; }
   .float-card { animation: float-card 6s ease-in-out infinite; }

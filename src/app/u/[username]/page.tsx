@@ -188,7 +188,7 @@ export default async function ProfilePage(props: PageProps<'/u/[username]'>) {
           {tab === 'posts' && (
             <div className="flex flex-col gap-4">
               <PostComposer onlyFor={c.id} />
-              <PostList posts={posts.rows} emptyText={`${c.display_name} hasn't posted anything yet.`} />
+              <PostList posts={posts.rows} drafts={{ authorId: c.id }} emptyText={`${c.display_name} hasn't posted anything yet.`} />
             </div>
           )}
 

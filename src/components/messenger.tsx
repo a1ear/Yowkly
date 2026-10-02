@@ -452,7 +452,12 @@ export function Thread({ id, me, convo, busRef, onBack, onChanged, dock }: {
             {messages.length === 0 && <p className="m-0 py-10 text-center text-[13.5px] text-ink-3">Say hi 👋</p>}
             {messages.map((m, i) => (
               <Bubble key={m.clientKey ?? m.id} m={m} mine={m.sender_id === me} animate={fresh.has(m.clientKey ?? m.id)} pending={Boolean(m.pending)} showTime={!messages[i - 1] || Date.parse(m.created_at) - Date.parse(messages[i - 1].created_at) > 10 * 60 * 1000}
-                      onUnsend={() => start(async () => { const r = await unsendMessage(m.id); if (!r.ok) toast({ text: r.error, tone: 'error' }); else setMessages((l) => l?.map((x) => (x.id === m.id ? { ...x, deleted_at: new Date().toISOString(), body: '', images: [] } : x)) ?? l); })}
+                      onUnsend={() => start(async () => {
+                        const original = m;
+                        setMessages((l) => l?.map((x) => (x.id === m.id ? { ...x, deleted_at: new Date().toISOString(), body: '', images: [] } : x)) ?? l); // optimistic
+                        const r = await unsendMessage(m.id);
+                        if (!r.ok) { setMessages((l) => l?.map((x) => (x.id === m.id ? original : x)) ?? l); toast({ text: r.error, tone: 'error' }); }
+                      })}
                       onReport={() => setReporting(m.id)} onView={setViewing} />
             ))}
             {typing && <span className="mt-1 inline-flex w-fit items-center gap-1 rounded-2xl bg-surface-2 px-3 py-2" aria-label="typing"><Dot d={0} /><Dot d={150} /><Dot d={300} /></span>}

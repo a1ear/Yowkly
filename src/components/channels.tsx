@@ -7,6 +7,7 @@ import { Dialog } from './dialog';
 import { Icon } from './icons';
 import { PostComposer, PostList } from './posts';
 import { useMe } from './header-account';
+import { revalidate, useCached } from '@/lib/use-cached';
 import { useToast } from './toast';
 import { formatCompact } from '@/lib/format';
 import type { Post } from '@/lib/data/posts';
@@ -16,15 +17,9 @@ const toSlug = (name: string) => name.toLowerCase().normalize('NFKD').replace(/[
 /** Community, left column: create a channel, your channels, and a way to find more. */
 export function ChannelsSidebar() {
   const me = useMe();
-  const [mine, setMine] = useState<MyChannel[] | null>(null);
+  const cached = useCached<MyChannel[] | null>(me ? 'my-channels' : null, myChannels, 60_000);
+  const mine = cached === undefined ? null : (cached ?? []);
   const [creating, setCreating] = useState(false);
-
-  useEffect(() => {
-    if (!me) return;
-    let live = true;
-    myChannels().then((c) => { if (live) setMine(c ?? []); });
-    return () => { live = false; };
-  }, [me]);
 
   return (
     <nav aria-label="Channels" className="flex flex-col gap-4">
@@ -79,6 +74,7 @@ export function CreateChannelDialog({ onClose }: { onClose: () => void }) {
       const r = await createChannel({ name, slug: address, description });
       if (!r.ok) return setError(r.error);
       toast({ text: 'Channel created. You are its owner.', tone: 'ok' });
+      revalidate('my-channels', myChannels);
       onClose();
       router.push(`/community/c/${r.data.slug}`);
     });
@@ -136,10 +132,16 @@ export function ChannelBody({ channel, posts }: { channel: { id: string; slug: s
   const toggle = () => start(async () => {
     if (!state?.signedIn) return router.push(`/auth/sign-in?next=/community/c/${channel.slug}`);
     const joining = !state.role;
-    const r = joining ? await joinChannel(channel.id, channel.slug) : await leaveChannel(channel.id, channel.slug);
-    if (!r.ok) return toast({ text: r.error, tone: 'error' });
-    setState({ ...state, role: joining ? 'member' : null });
+    const before = state;
+    setState({ ...state, role: joining ? 'member' : null }); // optimistic
     setMembers((n) => n + (joining ? 1 : -1));
+    const r = joining ? await joinChannel(channel.id, channel.slug) : await leaveChannel(channel.id, channel.slug);
+    if (!r.ok) {
+      setState(before);
+      setMembers((n) => n - (joining ? 1 : -1));
+      return toast({ text: r.error, tone: 'error' });
+    }
+    revalidate('my-channels', myChannels);
     toast({ text: joining ? `You joined ${channel.name}.` : `You left ${channel.name}.`, tone: 'ok' });
   });
 
@@ -165,7 +167,7 @@ export function ChannelBody({ channel, posts }: { channel: { id: string; slug: s
           Join {channel.name} to post and comment here.
         </p>
       )}
-      <PostList posts={posts} canModerate={staff} emptyText={`Nothing in ${channel.name} yet. Start the first conversation.`} />
+      <PostList posts={posts} canModerate={staff} drafts={{ channelId: channel.id }} emptyText={`Nothing in ${channel.name} yet. Start the first conversation.`} />
     </div>
   );
 }

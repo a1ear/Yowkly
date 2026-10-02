@@ -10,6 +10,7 @@ import { NotificationsBell } from './notifications-popover';
 import { MessagesBell } from './messages-popover';
 import { MODE_OPTIONS, PresenceHeartbeat, StatusDot } from './presence';
 import { setMyStatus } from '@/app/actions/friends';
+import { clearCache } from '@/lib/use-cached';
 import type { StatusMode } from '@/app/actions/friends';
 
 type Me = {
@@ -76,6 +77,7 @@ export function HeaderAccount() {
 
   async function signOut() {
     setOpen(false);
+    clearCache(); // nothing personal stays in memory for the next person on this device
     await serverSignOut(); // clears the session cookie and redirects home
     router.refresh();
   }
