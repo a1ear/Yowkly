@@ -9,3 +9,6 @@ export const OPEN_CHAT_EVENT = 'yowkly:open-chat';
 
 /** Optimistic posts: the composer announces a draft, then whether it saved or failed. */
 export const POST_DRAFT_EVENT = 'yowkly:post-draft';
+
+/** Start a call from a chat (detail = { conversationId, video, peer: { display_name, username, avatar_path } }). */
+export const START_CALL_EVENT = 'yowkly:start-call';

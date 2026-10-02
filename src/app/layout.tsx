@@ -7,6 +7,7 @@ import { Toaster } from '@/components/toast';
 import { CookieNotice } from '@/components/cookie-notice';
 import { ChatDock } from '@/components/chat-dock';
 import { TooltipLayer } from '@/components/tooltips';
+import { CallLauncher } from '@/components/call-launcher';
 import { Analytics } from '@vercel/analytics/next';
 import { publicEnv } from '@/lib/env';
 import './globals.css';
@@ -44,6 +45,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           <CookieNotice />
           <ChatDock />
           <TooltipLayer />
+          <CallLauncher />
         </Toaster>
         {/* Cookie-free page-view analytics; reports only when deployed on Vercel. */}
         <Analytics />

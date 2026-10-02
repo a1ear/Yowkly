@@ -17,6 +17,7 @@ export type ChatImage = { path: string; url?: string; width: number | null; heig
 export type ChatMessage = {
   id: string; conversation_id: string; sender_id: string; body: string; images: ChatImage[];
   deleted_at: string | null; created_at: string;
+  kind?: 'text' | 'call';
 };
 
 /** Your inbox (chats and requests), newest first. Null when signed out. */
@@ -59,7 +60,7 @@ async function withPhotoLinks(rows: ChatMessage[]) {
 export async function loadMessages(conversationId: string, before?: string): Promise<ChatMessage[]> {
   if (!uuid.safeParse(conversationId).success) return [];
   const db = await userClient();
-  let q = db.from('messages').select('id, conversation_id, sender_id, body, images, deleted_at, created_at')
+  let q = db.from('messages').select('id, conversation_id, sender_id, body, images, deleted_at, created_at, kind')
     .eq('conversation_id', conversationId).order('created_at', { ascending: false }).limit(50);
   if (before && !Number.isNaN(Date.parse(before))) q = q.lt('created_at', before);
   const { data } = await q;
@@ -70,7 +71,7 @@ export async function loadMessages(conversationId: string, before?: string): Pro
 export async function loadMessage(messageId: string): Promise<ChatMessage | null> {
   if (!uuid.safeParse(messageId).success) return null;
   const db = await userClient();
-  const { data } = await db.from('messages').select('id, conversation_id, sender_id, body, images, deleted_at, created_at').eq('id', messageId).maybeSingle();
+  const { data } = await db.from('messages').select('id, conversation_id, sender_id, body, images, deleted_at, created_at, kind').eq('id', messageId).maybeSingle();
   if (!data) return null;
   return (await withPhotoLinks([data as ChatMessage]))[0];
 }

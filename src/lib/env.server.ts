@@ -35,6 +35,10 @@ const serverSchema = z.object({
   GITHUB_SCAN_TOKEN: optional,
   GITHUB_SCAN_REPO: z.string().regex(/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/, 'must look like owner/repo').default('a1ear/Yowkly'),
   GITHUB_SCAN_REF: z.string().default('main'),
+  // Cloudflare TURN (Realtime > TURN Server): relays calls on networks that block direct
+  // connections. Optional: without it calls still work on most networks (STUN only).
+  CLOUDFLARE_TURN_KEY_ID: optional,
+  CLOUDFLARE_TURN_API_TOKEN: optional,
 });
 
 // Values pasted into Vercel with a stray space or newline would otherwise break
@@ -56,6 +60,8 @@ const parsed = serverSchema.safeParse({
   GITHUB_SCAN_TOKEN: clean(process.env.GITHUB_SCAN_TOKEN),
   GITHUB_SCAN_REPO: clean(process.env.GITHUB_SCAN_REPO),
   GITHUB_SCAN_REF: clean(process.env.GITHUB_SCAN_REF),
+  CLOUDFLARE_TURN_KEY_ID: clean(process.env.CLOUDFLARE_TURN_KEY_ID),
+  CLOUDFLARE_TURN_API_TOKEN: clean(process.env.CLOUDFLARE_TURN_API_TOKEN),
 });
 if (!parsed.success) {
   // Name every bad setting at once, e.g. "R2_BUCKET_QUARANTINE: must be just the bucket name".

@@ -11,7 +11,7 @@ import {
 } from '@/app/actions/messages';
 import { shrinkImage } from '@/lib/image-shrink';
 import { timeAgo } from '@/lib/format';
-import { MESSAGES_EVENT } from '@/lib/events';
+import { MESSAGES_EVENT, START_CALL_EVENT } from '@/lib/events';
 import type { TemplateCard as Card } from '@/lib/types';
 import { Avatar } from './bits';
 import { Dialog } from './dialog';
@@ -418,6 +418,20 @@ export function Thread({ id, me, convo, busRef, onBack, onChanged, dock }: {
             </span>
           </Link>
         ) : <span className="flex-1" />}
+        {convo?.is_friend && convo.status === 'active' && !blocked && (
+          <span className="flex shrink-0">
+            {([['voice', 'phoneCall', 'Voice call'], ['video', 'video', 'Video call']] as const).map(([kind, icon, label]) => (
+              <button key={kind} type="button" aria-label={`${label} ${convo.other_display_name}`}
+                      onClick={() => window.dispatchEvent(new CustomEvent(START_CALL_EVENT, { detail: {
+                        conversationId: id, video: kind === 'video',
+                        peer: { display_name: convo.other_display_name, username: convo.other_username, avatar_path: convo.other_avatar_path },
+                      } }))}
+                      className={`inline-flex items-center justify-center rounded-full text-ink-2 hover:bg-surface-2 hover:text-accent-ink ${dock ? 'h-8 w-8' : 'h-10 w-10'}`}>
+                <Icon name={icon} size={dock ? 15 : 18} />
+              </button>
+            ))}
+          </span>
+        )}
         {dock && (
           <span className="flex shrink-0">
             <Link href={`/messages?c=${id}`} aria-label="Open in Messages" title="Open in Messages" className="inline-flex h-8 w-8 items-center justify-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink"><Icon name="external" size={15} /></Link>
@@ -543,6 +557,13 @@ function Bubble({ m, mine, showTime, animate, pending, onUnsend, onReport, onVie
 
   if (m.deleted_at) {
     return <p className={`m-0 max-w-[75%] rounded-2xl px-3.5 py-2 text-[13px] text-ink-3 italic shadow-[inset_0_0_0_1px_var(--line)] ${mine ? 'self-end' : ''}`}>Message unsent</p>;
+  }
+  if (m.kind === 'call') {
+    return (
+      <p className={`m-0 my-1 inline-flex items-center gap-2 self-center rounded-full bg-surface-2 px-3.5 py-1.5 text-[12.5px] ${m.body.startsWith('Missed') || m.body.endsWith('declined') ? 'text-danger' : 'text-ink-2'} ${animate ? 'msg-in-theirs' : ''}`}>
+        <Icon name={m.body.startsWith('Video') ? 'video' : 'phoneCall'} size={13} />{m.body} · {timeAgo(m.created_at)}
+      </p>
+    );
   }
   return (
     <div className={`group flex flex-col gap-1 transition-opacity duration-200 ${mine ? 'items-end' : 'items-start'} ${animate ? (mine ? 'msg-in-mine' : 'msg-in-theirs') : ''} ${pending ? 'opacity-60' : ''}`}

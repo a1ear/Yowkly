@@ -108,3 +108,17 @@ How to deploy, monitor, back up and restore Yowkly. "Done" means this runbook ha
 | award-week | 00:05 Monday | `grant_award('week', …)` overall and for Mobile Apps |
 | award-month | 00:10 on the 1st | `grant_award('month', previous month)` |
 | purge-deleted-accounts | 03:00 daily | hard-deletes accounts soft-deleted more than 30 days ago |
+
+
+## Calls (voice and video)
+
+Calls go directly between the two browsers (WebRTC). Ringing and connection set-up use Supabase Realtime
+private channels (`call:<id>`, members only). About 1 in 5 networks (strict office or mobile) block direct
+connections; those calls need a relay:
+
+1. Cloudflare dashboard > **Realtime** > **TURN Server** > **Create TURN app**. Copy the **Turn Token ID** and the **API Token**.
+2. Vercel > Settings > Environment Variables (Production): `CLOUDFLARE_TURN_KEY_ID` and `CLOUDFLARE_TURN_API_TOKEN` (both secret). Redeploy.
+3. Check: signed in, open `/api/calls/ice`; `"relay": true` means the relay is on.
+
+Without these, calls still work on most networks (STUN only). The API token never reaches the browser: the
+server hands out 4-hour credentials to signed-in users only.

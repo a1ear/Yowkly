@@ -872,6 +872,58 @@ test('channels: create, join, post, roles, kick/ban, staff powers and their limi
   none(await as(db, null, `select 1 from public.post_cards where id = $1`, [p2]), 'posts of a deleted channel are hidden');
 });
 
+test('calls: friends only, one at a time, only the callee answers, summaries land in the chat', async () => {
+  const ana = await createUser(db, { email: 'call-ana@test.dev' });
+  const ben = await createUser(db, { email: 'call-ben@test.dev' });
+  const cat = await createUser(db, { email: 'call-cat@test.dev' });   // not ana's friend
+  const dee = await createUser(db, { email: 'call-dee@test.dev' });   // ben's other friend
+  const befriend = async (a, b) => { ok(await as(db, a, `insert into public.follows (followee_id) values ($1)`, [b])); ok(await as(db, b, `insert into public.follows (followee_id) values ($1)`, [a])); };
+  await befriend(ana, ben);
+  await befriend(dee, ben);
+  const convo = async (a, b) => ok(await as(db, a, `select public.start_conversation($1) as id`, [b]))[0].id;
+  const ab = await convo(ana, ben);
+  const ac = await convo(ana, cat);
+  const db_ = await convo(dee, ben);
+  const start = (uid, c, video = false) => as(db, uid, `select public.start_call($1, $2) as id`, [c, video]);
+
+  fails(await start(ana, ac), /friends only/, 'calling a non-friend');
+  fails(await start(cat, ab), /Conversation not found/, 'calling into someone else\'s chat');
+  fails(await as(db, ana, `insert into public.calls (conversation_id, caller_id, callee_id) values ($1, $2, $3)`, [ab, ana, ben]), /permission denied/, 'direct insert');
+
+  const [{ id: c1 }] = ok(await start(ana, ab, true));
+  fails(await start(dee, db_), /another call/, 'ringing someone already being rung');
+  fails(await start(ana, ab), /already in a call/);
+  const answer = async (uid, c) => ok(await as(db, uid, `select public.answer_call($1) as r`, [c]))[0].r;
+  assert.equal(await answer(ana, c1), 'ended', 'caller answers their own call');
+  assert.equal(await answer(cat, c1), 'ended', 'outsider answers');
+  none(await as(db, cat, `select 1 from public.calls where id = $1`, [c1]), 'outsider sees the call');
+  assert.equal(ok(await as(db, ben, `select id from public.my_incoming_call()`))[0].id, c1, 'callee sees it ringing');
+
+  assert.equal(await answer(ben, c1), 'answered');
+  await sql(`update public.calls set answered_at = now() - interval '125 seconds' where id = $1`, [c1]);
+  ok(await as(db, ben, `select public.end_call($1)`, [c1]));
+  ok(await as(db, ana, `select public.end_call($1)`, [c1]), 'hanging up twice is harmless');
+  const [log1] = await sql(`select body, kind, sender_id from public.messages where conversation_id = $1 and kind = 'call' order by created_at desc limit 1`, [ab]);
+  assert.deepEqual([log1.body, log1.kind, log1.sender_id], ['Video call · 2 min', 'call', ana]);
+
+  // Declined, cancelled and unanswered calls.
+  const [{ id: c2 }] = ok(await start(ana, ab));
+  fails(await as(db, ana, `select public.decline_call($1)`, [c2]), /has ended/, 'caller declines');
+  ok(await as(db, ben, `select public.decline_call($1)`, [c2]));
+  const [{ id: c3 }] = ok(await start(ana, ab));
+  ok(await as(db, ana, `select public.end_call($1)`, [c3]));
+  const [{ id: c4 }] = ok(await start(ana, ab));
+  await sql(`update public.calls set created_at = now() - interval '2 minutes' where id = $1`, [c4]);
+  assert.equal(await answer(ben, c4), 'ended', 'answering after 45 s');
+  const logs = (await sql(`select body from public.messages where conversation_id = $1 and kind = 'call' order by created_at`, [ab])).map((m) => m.body);
+  assert.deepEqual(logs, ['Video call · 2 min', 'Call declined', 'Missed call', 'Missed call'], 'a rung-out call is logged too');
+  assert.equal((await sql(`select status from public.calls where id = $1`, [c4]))[0].status, 'missed');
+
+  // A block stops calls even between friends.
+  ok(await as(db, ben, `select public.set_block($1, true)`, [ana]));
+  fails(await start(ana, ab), /can't call/);
+});
+
 test('reports are private to the reporter and moderators', async () => {
   ok(await as(db, u.bob, `insert into public.reports (target_type, target_id, reason) values ('template', $1, 'broken')`, [s.tpl]));
   none(await as(db, u.alice, `select id from public.reports`));
