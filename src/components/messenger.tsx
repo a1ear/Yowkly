@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
-import { browserClient } from '@/lib/supabase/browser';
+import { realtimeClient } from '@/lib/supabase/browser';
 import {
   chatTemplateCards, isBlocked, listConversations, loadMessage, loadMessages, markConversationRead,
   openConversation, respondToRequest, searchPeople, sendMessage, setBlocked, unsendMessage,
@@ -29,10 +29,10 @@ const TEMPLATE_LINK = /(?:https?:\/\/(?:localhost:\d+|[a-z0-9-]+\.vercel\.app|yo
  * arrive over Supabase Realtime; Postgres row-level security decides who gets
  * them, so a client only ever hears about its own conversations.
  */
-export function Messenger({ me, initial }: { me: string; initial: string | null }) {
+export function Messenger({ me, initial, initialTab = 'chats' }: { me: string; initial: string | null; initialTab?: 'chats' | 'requests' }) {
   const router = useRouter();
   const [list, setList] = useState<Conversation[] | null>(null);
-  const [tab, setTab] = useState<'chats' | 'requests'>('chats');
+  const [tab, setTab] = useState<'chats' | 'requests'>(initialTab);
   const [openId, setOpenId] = useState<string | null>(initial);
   const toast = useToast();
   const [query, setQuery] = useState('');
@@ -70,9 +70,12 @@ export function Messenger({ me, initial }: { me: string; initial: string | null 
 
   // One subscription for every conversation you're in (RLS filters the rest out).
   useEffect(() => {
-    const db = browserClient();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let cleanup = () => {};
+    let cancelled = false;
     const later = () => { clearTimeout(timer); timer = setTimeout(refresh, 400); };
+    realtimeClient().then((db) => {
+    if (cancelled) return;
     const channel = db.channel('dm-inbox')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload: { new: Record<string, unknown> }) => {
         const row = payload.new as ChatMessage;
@@ -88,7 +91,9 @@ export function Messenger({ me, initial }: { me: string; initial: string | null 
         later();
       })
       .subscribe();
-    return () => { clearTimeout(timer); db.removeChannel(channel); };
+    cleanup = () => { db.removeChannel(channel); };
+    });
+    return () => { cancelled = true; clearTimeout(timer); cleanup(); };
   }, [refresh]);
 
   const open = (id: string | null) => {
@@ -116,7 +121,7 @@ export function Messenger({ me, initial }: { me: string; initial: string | null 
   };
 
   return (
-    <div className="mx-auto grid h-[calc(100dvh-72px)] max-w-[1200px] md:grid-cols-[340px_1fr] md:gap-4 md:px-6 md:py-5 max-md:h-[calc(100dvh-56px-64px)]">
+    <div className="mx-auto grid h-[calc(100dvh-64px)] max-w-[1200px] md:grid-cols-[340px_1fr] md:gap-4 md:px-6 md:py-5 max-md:h-[calc(100dvh-56px-64px)]">
       <aside aria-label="Conversations" className={`${openId ? 'max-md:hidden' : ''} flex min-h-0 flex-col overflow-hidden bg-surface-1 md:rounded-2xl md:shadow-[inset_0_0_0_1px_var(--line)]`}>
         <div className="flex items-center justify-between px-4 pt-4 pb-2">
           <h1 className="m-0 font-display text-3xl font-normal">Messages</h1>
@@ -213,11 +218,13 @@ export function Messenger({ me, initial }: { me: string; initial: string | null 
 
 type Pending = { key: string; preview: string; state: 'uploading' | 'ready' | 'failed'; path?: string; error?: string };
 type Shown = ChatMessage & { clientKey?: string; pending?: boolean };
-type ThreadBus = { incoming: (m: ChatMessage) => void; unsent: (id: string) => void };
+export type ThreadBus = { incoming: (m: ChatMessage) => void; unsent: (id: string) => void };
 
-function Thread({ id, me, convo, busRef, onBack, onChanged }: {
+export function Thread({ id, me, convo, busRef, onBack, onChanged, dock }: {
   id: string; me: string; convo: Conversation | null; busRef: React.RefObject<ThreadBus | null>;
   onBack: () => void; onChanged: () => void;
+  /** Set when shown in the floating chat box: compact header with minimise / open full / close. */
+  dock?: { onMinimize: () => void; onClose: () => void };
 }) {
   const toast = useToast();
   const [messages, setMessages] = useState<Shown[] | null>(null);
@@ -276,8 +283,11 @@ function Thread({ id, me, convo, busRef, onBack, onChanged }: {
 
   // Typing dots over a private channel only the two of you can join.
   useEffect(() => {
-    const db = browserClient();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let cleanup = () => {};
+    let cancelled = false;
+    realtimeClient().then((db) => {
+    if (cancelled) return;
     const ch = db.channel(`dm:${id}`, { config: { private: true } })
       .on('broadcast', { event: 'typing' }, (msg: { payload?: unknown }) => {
         if ((msg.payload as { uid?: string })?.uid === me) return;
@@ -287,7 +297,9 @@ function Thread({ id, me, convo, busRef, onBack, onChanged }: {
       })
       .subscribe();
     channelRef.current = ch;
-    return () => { clearTimeout(timer); db.removeChannel(ch); channelRef.current = null; };
+    cleanup = () => { db.removeChannel(ch); channelRef.current = null; };
+    });
+    return () => { cancelled = true; clearTimeout(timer); cleanup(); };
   }, [id, me]);
 
   const onType = (v: string) => {
@@ -388,23 +400,32 @@ function Thread({ id, me, convo, busRef, onBack, onChanged }: {
 
   return (
     <>
-      <header className="flex items-center gap-3 border-b border-line px-3 py-2.5 md:px-4">
-        <button type="button" onClick={onBack} aria-label="Back to conversations" className="inline-flex h-10 w-10 items-center justify-center rounded-full hover:bg-surface-2 md:hidden">
-          <Icon name="chevronLeft" size={20} />
-        </button>
+      <header className={`flex items-center border-b border-line ${dock ? 'gap-2 px-2.5 py-1.5' : 'gap-3 px-3 py-2.5 md:px-4'}`}>
+        {!dock && (
+          <button type="button" onClick={onBack} aria-label="Back to conversations" className="inline-flex h-10 w-10 items-center justify-center rounded-full hover:bg-surface-2 md:hidden">
+            <Icon name="chevronLeft" size={20} />
+          </button>
+        )}
         {convo ? (
           <Link href={`/@${convo.other_username}`} className="flex min-w-0 flex-1 items-center gap-3">
             <span className="relative shrink-0">
-              <Avatar name={convo.other_display_name} path={convo.other_avatar_path} seed={convo.other_username} size={40} />
+              <Avatar name={convo.other_display_name} path={convo.other_avatar_path} seed={convo.other_username} size={dock ? 32 : 40} />
               {convo.is_friend && <UserStatusDot userId={convo.other_id} size={11} className="absolute -right-0.5 -bottom-0.5" />}
             </span>
             <span className="flex min-w-0 flex-col leading-tight">
-              <span className="truncate font-semibold">{convo.other_display_name}</span>
+              <span className={`truncate font-semibold ${dock ? 'text-[14px]' : ''}`}>{convo.other_display_name}</span>
               <span className="truncate text-[12.5px] text-ink-3">{typing ? 'typing…' : `@${convo.other_username}${convo.is_friend ? ' · Friend' : ''}`}</span>
             </span>
           </Link>
         ) : <span className="flex-1" />}
-        {convo && (
+        {dock && (
+          <span className="flex shrink-0">
+            <Link href={`/messages?c=${id}`} aria-label="Open in Messages" title="Open in Messages" className="inline-flex h-8 w-8 items-center justify-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink"><Icon name="external" size={15} /></Link>
+            <button type="button" onClick={dock.onMinimize} aria-label="Minimise chat" title="Minimise" className="inline-flex h-8 w-8 items-center justify-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink"><Icon name="chevronDown" size={16} /></button>
+            <button type="button" onClick={dock.onClose} aria-label="Close chat" title="Close" className="inline-flex h-8 w-8 items-center justify-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink"><Icon name="x" size={15} /></button>
+          </span>
+        )}
+        {convo && !dock && (
           <div className="relative">
             <button type="button" onClick={() => setMenu((v) => !v)} aria-label="Conversation options" aria-haspopup="menu" aria-expanded={menu}
                     className="inline-flex h-10 w-10 items-center justify-center rounded-full text-ink-3 hover:bg-surface-2 hover:text-ink">
@@ -422,7 +443,7 @@ function Thread({ id, me, convo, busRef, onBack, onChanged }: {
         )}
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 md:px-5">
+      <div className={`min-h-0 flex-1 overflow-y-auto px-3 py-4 ${dock ? '' : 'md:px-5'}`}>
         {messages === null ? (
           <div className="flex flex-col gap-3">{[0, 1, 2].map((i) => <span key={i} className={`skeleton block h-10 w-2/3 ${i % 2 ? 'self-end' : ''}`} />)}</div>
         ) : (

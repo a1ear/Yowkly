@@ -24,14 +24,14 @@ export function FriendsSidebar() {
 
   if (me === null) {
     return (
-      <p className="m-0 rounded-2xl bg-surface-1 p-4 text-[13px] text-ink-2 shadow-[inset_0_0_0_1px_var(--line)]">
+      <p className="m-0 px-2 text-[13px] text-ink-2">
         <Link href="/auth/sign-in?next=/community" className="font-medium text-accent-ink underline underline-offset-4">Sign in</Link> to see which friends are online.
       </p>
     );
   }
   const online = (friends ?? []).filter((f) => f.status === 'online').length;
   return (
-    <section aria-labelledby="friends-title" className="flex flex-col gap-2 rounded-2xl bg-surface-1 p-3 shadow-[inset_0_0_0_1px_var(--line)]">
+    <section aria-labelledby="friends-title" className="flex flex-col gap-1">
       <div className="flex items-baseline justify-between px-2 pt-1">
         <h2 id="friends-title" className="m-0 text-sm font-semibold">Friends</h2>
         {friends && friends.length > 0 && <span className="font-mono text-[11px] text-ink-3">{online} online</span>}

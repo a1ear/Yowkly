@@ -7,6 +7,7 @@ import { MESSAGES_EVENT, YOWKBITS_EVENT } from '@/lib/events';
 import { Icon } from './icons';
 import { Avatar } from './bits';
 import { NotificationsBell } from './notifications-popover';
+import { MessagesBell } from './messages-popover';
 import { MODE_OPTIONS, PresenceHeartbeat, StatusDot } from './presence';
 import { setMyStatus } from '@/app/actions/friends';
 import type { StatusMode } from '@/app/actions/friends';
@@ -109,15 +110,7 @@ export function HeaderAccount() {
               <Icon name="shield" size={20} />
             </Link>
           )}
-          <Link href="/messages" aria-label={me.unread_messages ? `Messages, ${me.unread_messages} unread` : 'Messages'} title="Messages"
-                className="relative inline-flex h-11 w-11 items-center justify-center rounded-md text-ink hover:bg-surface-2">
-            <Icon name="comment" size={20} />
-            {me.unread_messages > 0 && (
-              <span className="absolute top-1.5 right-1.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-accent px-1 font-mono text-[10px] font-semibold text-on-accent shadow-[0_0_0_2px_var(--canvas)]">
-                {me.unread_messages > 9 ? '9+' : me.unread_messages}
-              </span>
-            )}
-          </Link>
+          <MessagesBell unread={me.unread_messages} />
           <NotificationsBell unread={clearedFor === me ? 0 : me.unread} onRead={() => setClearedFor(me)} />
           <div ref={menuRef} className="relative hidden md:block">
             <button

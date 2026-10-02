@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { communityParams, getPosts, POST_PAGE_SIZE } from '@/lib/data/posts';
 import { PostComposer, PostList } from '@/components/posts';
 import { FriendsSidebar } from '@/components/friends';
+import { ChannelsSidebar } from '@/components/channels';
 import { Icon } from '@/components/icons';
 import { formatCount } from '@/lib/format';
 
@@ -24,18 +25,26 @@ export default async function CommunityPage(props: PageProps<'/community'>) {
 
   return (
     <div className="mx-auto grid max-w-[1400px] gap-6 px-4 pt-6 pb-16 md:px-6 xl:grid-cols-[280px_minmax(0,760px)_280px] xl:justify-center">
-      <aside aria-label="Friends" className="hidden xl:block">
-        <div className="sticky top-[96px]"><FriendsSidebar /></div>
+      <aside aria-label="Channels" className="hidden xl:block">
+        <div className="sticky top-[88px]"><ChannelsSidebar /></div>
       </aside>
       <div className="mx-auto w-full max-w-[760px] min-w-0">
       <h1 className="sr-only">Community</h1>
 
-      <details className="group mb-4 xl:hidden">
-        <summary className="flex h-11 cursor-pointer list-none items-center justify-between rounded-xl bg-surface-1 px-4 text-sm font-semibold shadow-[inset_0_0_0_1px_var(--line)]">
-          Friends<Icon name="chevronDown" size={16} className="transition group-open:rotate-180" />
-        </summary>
-        <div className="mt-2"><FriendsSidebar /></div>
-      </details>
+      <div className="mb-4 grid grid-cols-2 gap-2 xl:hidden">
+        <details className="group">
+          <summary className="flex h-11 cursor-pointer list-none items-center justify-between rounded-xl bg-surface-1 px-4 text-sm font-semibold shadow-[inset_0_0_0_1px_var(--line)]">
+            Channels<Icon name="chevronDown" size={16} className="transition group-open:rotate-180" />
+          </summary>
+          <div className="mt-3"><ChannelsSidebar /></div>
+        </details>
+        <details className="group">
+          <summary className="flex h-11 cursor-pointer list-none items-center justify-between rounded-xl bg-surface-1 px-4 text-sm font-semibold shadow-[inset_0_0_0_1px_var(--line)]">
+            Friends<Icon name="chevronDown" size={16} className="transition group-open:rotate-180" />
+          </summary>
+          <div className="mt-3"><FriendsSidebar /></div>
+        </details>
+      </div>
 
       <div><PostComposer /></div>
 
@@ -58,6 +67,9 @@ export default async function CommunityPage(props: PageProps<'/community'>) {
         </nav>
       )}
       </div>
+      <aside aria-label="Friends" className="hidden xl:block">
+        <div className="sticky top-[88px]"><FriendsSidebar /></div>
+      </aside>
     </div>
   );
 }

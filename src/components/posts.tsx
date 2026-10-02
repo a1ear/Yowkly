@@ -23,7 +23,7 @@ type Kind = 'like' | 'dislike';
  * person (their own profile). The server and the database validate everything
  * again, this is just the form.
  */
-export function PostComposer({ onlyFor }: { onlyFor?: string }) {
+export function PostComposer({ onlyFor, channel }: { onlyFor?: string; channel?: { id: string; name: string } }) {
   const me = useMe();
   const pathname = usePathname();
   const toast = useToast();
@@ -77,11 +77,12 @@ export function PostComposer({ onlyFor }: { onlyFor?: string }) {
 
       <Dialog open={open} onClose={() => setOpen(false)} title="Create post" width={560}>
         <form ref={formRef} onSubmit={submit} className="flex flex-col gap-3">
+          {channel && <input type="hidden" name="channel" value={channel.id} />}
           <div className="flex items-center gap-3">
             <Avatar name={me.display_name} path={me.avatar_path} seed={me.username} size={40} />
             <div className="flex flex-col leading-tight">
               <span className="font-semibold">{me.display_name}</span>
-              <span className="text-[13px] text-ink-3">Shared with the Yowkly community</span>
+              <span className="text-[13px] text-ink-3">{channel ? `Posting in ${channel.name}` : 'Shared with the Yowkly community'}</span>
             </div>
           </div>
           <label className="flex flex-col gap-1">
@@ -121,7 +122,7 @@ const bestTwo = (list: PostComment[]) =>
   [...list].sort((a, b) => (b.like_count - b.dislike_count) - (a.like_count - a.dislike_count) || b.created_at.localeCompare(a.created_at)).slice(0, 2);
 
 /** A list of posts, each with like, dislike, comments, a report link and (on your own) delete. */
-export function PostList({ posts, emptyText }: { posts: Post[]; emptyText: string }) {
+export function PostList({ posts, emptyText, canModerate = false }: { posts: Post[]; emptyText: string; canModerate?: boolean }) {
   const [me, setMe] = useState<string | null>(null);
   const [mine, setMine] = useState<Record<string, Kind>>({});
   const [counts, setCounts] = useState<Record<string, Counts>>({});
@@ -158,7 +159,7 @@ export function PostList({ posts, emptyText }: { posts: Post[]; emptyText: strin
     <ul className="m-0 flex list-none flex-col gap-4 p-0">
       {visible.map((p) => (
         <li key={p.id}>
-          <PostItem post={p} me={me} reaction={mine[p.id]} counts={countsOf(p)} onReact={(k) => react(p, k)}
+          <PostItem post={p} me={me} canModerate={canModerate} reaction={mine[p.id]} counts={countsOf(p)} onReact={(k) => react(p, k)}
                     onDeleted={() => setHidden((s) => new Set(s).add(p.id))} />
         </li>
       ))}
@@ -177,8 +178,8 @@ function ReactionButton({ kind, active, count, onClick }: { kind: Kind; active: 
   );
 }
 
-function PostItem({ post, me, reaction, counts, onReact, onDeleted }: {
-  post: Post; me: string | null; reaction: Kind | undefined; counts: Counts; onReact: (k: Kind) => void; onDeleted: () => void;
+function PostItem({ post, me, canModerate, reaction, counts, onReact, onDeleted }: {
+  post: Post; me: string | null; canModerate: boolean; reaction: Kind | undefined; counts: Counts; onReact: (k: Kind) => void; onDeleted: () => void;
 }) {
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -186,6 +187,8 @@ function PostItem({ post, me, reaction, counts, onReact, onDeleted }: {
   const [reporting, setReporting] = useState(false);
   const [menu, setMenu] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [reason, setReason] = useState('');
   const [content, setContent] = useState({ body: post.body, tags: post.tags, edited: Boolean(post.edited_at) });
   const menuRef = useRef<HTMLDivElement>(null);
   const [showComments, setShowComments] = useState(false);
@@ -210,6 +213,12 @@ function PostItem({ post, me, reaction, counts, onReact, onDeleted }: {
     onDeleted();
     toast({ text: 'Post deleted.', tone: 'ok' });
   });
+  const modRemove = () => start(async () => {
+    const r = await deletePost(post.id, reason);
+    if (!r.ok) return toast({ text: r.error, tone: 'error' });
+    onDeleted();
+    toast({ text: 'Post removed from the channel.', tone: 'ok' });
+  });
 
   return (
     <article className="flex flex-col gap-3 rounded-2xl bg-surface-1 p-4 shadow-[inset_0_0_0_1px_var(--line)] md:p-5">
@@ -219,7 +228,10 @@ function PostItem({ post, me, reaction, counts, onReact, onDeleted }: {
         </Link>
         <div className="flex min-w-0 flex-1 flex-col leading-tight">
           <Link href={`/@${post.author_username}`} className="truncate font-semibold hover:text-accent-ink">{post.author_display_name}</Link>
-          <span className="truncate text-[13px] text-ink-3">@{post.author_username} · <time dateTime={post.created_at}>{timeAgo(post.created_at)}</time>{content.edited && ' · Edited'}</span>
+          <span className="truncate text-[13px] text-ink-3">
+            @{post.author_username} · <time dateTime={post.created_at}>{timeAgo(post.created_at)}</time>{content.edited && ' · Edited'}
+            {post.channel_slug && <> · in <Link href={`/community/c/${post.channel_slug}`} className="font-medium text-ink-2 hover:text-accent-ink">{post.channel_name}</Link></>}
+          </span>
         </div>
         <div ref={menuRef} className="relative">
           <button type="button" onClick={() => setMenu((v) => !v)} aria-label="Post options" aria-haspopup="menu" aria-expanded={menu}
@@ -240,15 +252,32 @@ function PostItem({ post, me, reaction, counts, onReact, onDeleted }: {
                   </button>
                 </>
               ) : (
-                <button role="menuitem" type="button" onClick={() => { setMenu(false); if (me) setReporting(true); else toast({ text: 'Sign in to report a post.', tone: 'error' }); }}
-                        className="flex h-10 w-full items-center gap-2.5 rounded-md px-3 text-left text-sm hover:bg-surface-2">
-                  <Icon name="flag" size={16} />Report post
-                </button>
+                <>
+                  {canModerate && (
+                    <button role="menuitem" type="button" onClick={() => { setMenu(false); setRemoving(true); }}
+                            className="flex h-10 w-full items-center gap-2.5 rounded-md px-3 text-left text-sm text-danger hover:bg-surface-2">
+                      <Icon name="shield" size={16} />Remove post
+                    </button>
+                  )}
+                  <button role="menuitem" type="button" onClick={() => { setMenu(false); if (me) setReporting(true); else toast({ text: 'Sign in to report a post.', tone: 'error' }); }}
+                          className="flex h-10 w-full items-center gap-2.5 rounded-md px-3 text-left text-sm hover:bg-surface-2">
+                    <Icon name="flag" size={16} />Report post
+                  </button>
+                </>
               )}
             </div>
           )}
         </div>
       </header>
+      {removing && (
+        <div role="alertdialog" aria-label="Remove this post?" className="flex flex-wrap items-center gap-2 rounded-lg bg-surface-2 px-3 py-2 text-sm">
+          <label className="sr-only" htmlFor={`why-${post.id}`}>Reason for removing</label>
+          <input id={`why-${post.id}`} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} autoFocus
+                 placeholder="Reason (shown in the channel's mod log)" className="field h-9 min-w-0 flex-1" />
+          <button type="button" onClick={() => setRemoving(false)} className="btn btn-ghost h-9 px-3">Cancel</button>
+          <button type="button" onClick={modRemove} disabled={pending || reason.trim().length < 3} className="btn btn-danger h-9 px-3">Remove</button>
+        </div>
+      )}
       {confirming && (
         <div role="alertdialog" aria-label="Delete this post?" className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-surface-2 px-3 py-2 text-sm">
           <span className="text-ink-2">Delete this post? This can&apos;t be undone.</span>

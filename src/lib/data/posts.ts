@@ -7,6 +7,7 @@ export type Post = {
   author_id: string; author_username: string; author_display_name: string; author_avatar_path: string | null;
   comment_count: number; dislike_count: number; edited_at: string | null;
   images: { path: string; alt: string | null; width: number | null; height: number | null }[];
+  channel_id: string | null; channel_slug: string | null; channel_name: string | null;
   /** The best one or two comments, shown under the post without opening the thread. */
   previews: PostComment[];
 };
@@ -29,9 +30,10 @@ export const communityParams = z.object({
 });
 
 /** Newest first. `authorId` limits it to one creator's posts, `tag` to one topic. */
-export async function getPosts(p: { authorId?: string; tag?: string; page?: number }) {
+export async function getPosts(p: { authorId?: string; tag?: string; page?: number; channelId?: string }) {
   let q = publicClient([POSTS_TAG]).from('post_cards').select('*', { count: 'exact' });
   if (p.authorId) q = q.eq('author_id', p.authorId);
+  if (p.channelId) q = q.eq('channel_id', p.channelId);
   if (p.tag) q = q.contains('tags', [p.tag]);
   const from = ((p.page ?? 1) - 1) * POST_PAGE_SIZE;
   const res = await q.order('created_at', { ascending: false }).range(from, from + POST_PAGE_SIZE - 1);

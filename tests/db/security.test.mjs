@@ -812,6 +812,66 @@ test('direct messages: friends chat, others request, members only, blocks, limit
   assert.equal(ok(await as(db, u.mod, `select body from public.reported_messages(array[$1]::uuid[])`, [m1.id]))[0].body, 'hey bo');
 });
 
+test('channels: create, join, post, roles, kick/ban, staff powers and their limits', async () => {
+  const own = await createUser(db, { email: 'chan-owner@test.dev' });
+  const mod = await createUser(db, { email: 'chan-mod@test.dev' });
+  const mem = await createUser(db, { email: 'chan-member@test.dev' });
+  const out = await createUser(db, { email: 'chan-outsider@test.dev' });
+  const create = (uid, name, slug) => as(db, uid, `select public.create_channel($1, $2, 'A test channel') as id`, [name, slug]);
+
+  fails(await create(u.unverified, 'Nope', 'nope'), /Verify your email/);
+  fails(await create(own, 'Okay name', 'Bad Slug!'), /lowercase letters/);
+  fails(await create(own, 'x', 'short-name'), /3 to 40/);
+  const [{ id: ch }] = ok(await create(own, 'React Builders', 'react-builders'));
+  fails(await create(mod, 'Dup', 'react-builders'), /taken/);
+  fails(await as(db, own, `insert into public.channels (slug, name, owner_id) values ('x-x-x', 'Direct', $1)`, [own]), /permission denied/, 'direct insert');
+  assert.equal((await sql(`select role from public.channel_members where channel_id = $1 and user_id = $2`, [ch, own]))[0].role, 'owner');
+
+  // Posting: members only.
+  const post = (uid, body) => as(db, uid, `select public.create_channel_post($1, $2) as id`, [ch, body]);
+  fails(await post(out, 'not a member'), /Join the channel/);
+  for (const uid of [mod, mem, out]) ok(await as(db, uid, `select public.join_channel($1)`, [ch]));
+  assert.equal((await sql(`select member_count from public.channels where id = $1`, [ch]))[0].member_count, 4);
+  const [{ id: p1 }] = ok(await post(mem, 'Hello channel'));
+  const [card] = ok(await as(db, null, `select channel_slug, channel_name from public.post_cards where id = $1`, [p1]));
+  assert.deepEqual([card.channel_slug, card.channel_name], ['react-builders', 'React Builders']);
+
+  // Roles: owner only.
+  fails(await as(db, mem, `select public.set_channel_role($1, $2, 'mod')`, [ch, mem]), /Only the owner/);
+  ok(await as(db, own, `select public.set_channel_role($1, $2, 'mod')`, [ch, mod]));
+  fails(await as(db, mod, `select public.set_channel_role($1, $2, 'mod')`, [ch, mem]), /Only the owner/, 'a mod promotes someone');
+  fails(await as(db, own, `select public.set_channel_role($1, $2, 'owner')`, [ch, mem]), /moderator or member/);
+
+  // Staff powers: remove posts (logged per channel), kick, ban with a reason.
+  fails(await as(db, out, `select public.delete_post($1, 'spam')`, [p1]), /Not allowed/, 'member removes another member\'s post');
+  fails(await as(db, mod, `select public.delete_post($1)`, [p1]), /reason is required/);
+  ok(await as(db, mod, `select public.delete_post($1, 'off topic')`, [p1]));
+  assert.deepEqual((await sql(`select action from public.channel_mod_log where channel_id = $1 and target_id = $2`, [ch, p1])).map((l) => l.action), ['remove_post']);
+  fails(await as(db, mod, `select public.moderate_channel_member($1, $2, 'kick')`, [ch, own]), /owner or another moderator/, 'mod kicks the owner');
+  fails(await as(db, mem, `select public.moderate_channel_member($1, $2, 'kick')`, [ch, out]), /Only channel moderators/);
+  fails(await as(db, mod, `select public.moderate_channel_member($1, $2, 'ban', '')`, [ch, out]), /reason is required/);
+  ok(await as(db, mod, `select public.moderate_channel_member($1, $2, 'ban', 'spamming links')`, [ch, out]));
+  fails(await as(db, out, `select public.join_channel($1)`, [ch]), /banned/);
+  fails(await post(out, 'still here?'), /banned/);
+  const [{ id: p2 }] = ok(await post(mem, 'Second post'));
+  fails(await as(db, out, `select public.create_post_comment($1, 'sneaky')`, [p2]), /banned/, 'banned person comments');
+  none(await as(db, mem, `select 1 from public.channel_bans`), 'ordinary member reads the ban list');
+  assert.equal(ok(await as(db, out, `select reason from public.channel_bans`))[0].reason, 'spamming links', 'banned person sees why');
+  none(await as(db, mem, `select 1 from public.channel_mod_log`), 'member reads the mod log');
+  ok(await as(db, mod, `select public.moderate_channel_member($1, $2, 'unban')`, [ch, out]));
+  ok(await as(db, out, `select public.join_channel($1)`, [ch]));
+
+  // The owner can act on mods; owners can't leave; only the owner edits or deletes.
+  ok(await as(db, own, `select public.moderate_channel_member($1, $2, 'kick')`, [ch, mod]));
+  fails(await as(db, own, `select public.leave_channel($1)`, [ch]), /Owners can't leave/);
+  ok(await as(db, mem, `select public.leave_channel($1)`, [ch]));
+  fails(await as(db, mem, `select public.update_channel($1, 'Hijacked', '', '')`, [ch]), /Only the owner/);
+  fails(await as(db, mem, `select public.delete_channel($1)`, [ch]), /Only the owner/);
+  ok(await as(db, own, `select public.update_channel($1, 'React Builders Club', 'Ship React things', 'Be kind')`, [ch]));
+  ok(await as(db, own, `select public.delete_channel($1)`, [ch]));
+  none(await as(db, null, `select 1 from public.post_cards where id = $1`, [p2]), 'posts of a deleted channel are hidden');
+});
+
 test('reports are private to the reporter and moderators', async () => {
   ok(await as(db, u.bob, `insert into public.reports (target_type, target_id, reason) values ('template', $1, 'broken')`, [s.tpl]));
   none(await as(db, u.alice, `select id from public.reports`));

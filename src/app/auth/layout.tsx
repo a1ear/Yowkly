@@ -10,7 +10,7 @@ const PERKS: [IconName, string, string][] = [
 /** Split screen: the pitch on the left (desktop only), the form card on the right. */
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mx-auto grid max-w-[1240px] items-center gap-12 px-4 py-10 md:px-10 lg:min-h-[calc(100dvh-72px)] lg:grid-cols-[1.1fr_minmax(0,460px)] lg:py-14">
+    <div className="mx-auto grid max-w-[1240px] items-center gap-12 px-4 py-10 md:px-10 lg:min-h-[calc(100dvh-64px)] lg:grid-cols-[1.1fr_minmax(0,460px)] lg:py-14">
       <aside className="hero-glow relative hidden flex-col gap-8 lg:flex" aria-label="Why join Yowkly">
         <div className="flex flex-col gap-4">
           <span className="rise eyebrow">Yowkly · by NightPatch</span>

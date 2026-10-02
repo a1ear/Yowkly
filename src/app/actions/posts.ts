@@ -25,7 +25,14 @@ export async function createPost(_: FormState, form: FormData): Promise<FormStat
   if (!images.success) return { error: 'A post can have up to 4 images.' };
   const a = await authed('post');
   if ('error' in a) return { error: a.error.error };
-  const { error } = await a.db.rpc('create_post', {
+  const channel = String(form.get('channel') ?? '');
+  if (channel && !uuid.safeParse(channel).success) return { error: 'Invalid channel.' };
+  const { error } = channel ? await a.db.rpc('create_channel_post', {
+    p_channel: channel,
+    p_body: body.data,
+    p_tags: tags.data.split(/[\s,]+/).filter(Boolean),
+    p_images: images.data,
+  }) : await a.db.rpc('create_post', {
     p_body: body.data,
     p_tags: tags.data.split(/[\s,]+/).filter(Boolean),
     p_images: images.data,

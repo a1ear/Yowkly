@@ -12,5 +12,5 @@ export default async function MessagesPage(props: PageProps<'/messages'>) {
   const uid = data?.claims?.sub;
   if (!uid) redirect('/auth/sign-in?next=/messages');
   const c = typeof sp.c === 'string' && /^[0-9a-f-]{36}$/.test(sp.c) ? sp.c : null;
-  return <Messenger me={uid} initial={c} />;
+  return <Messenger me={uid} initial={c} initialTab={sp.tab === 'requests' ? 'requests' : 'chats'} />;
 }

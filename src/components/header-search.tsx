@@ -42,11 +42,11 @@ export function HeaderSearch() {
       role="search"
       data-open={open || undefined}
       onKeyDown={(e) => e.key === 'Escape' && setOpen(false)}
-      className="ml-auto flex items-center gap-1 data-open:max-md:absolute data-open:max-md:inset-0 data-open:max-md:z-10 data-open:max-md:bg-canvas data-open:max-md:px-4"
+      className="flex items-center gap-1 md:relative data-open:max-md:absolute data-open:max-md:inset-0 data-open:max-md:z-10 data-open:max-md:bg-canvas data-open:max-md:px-4"
     >
       <label
-        className={`search-field flex h-11 items-center gap-2.5 overflow-hidden rounded-md bg-surface-1 text-ink-3 shadow-[inset_0_0_0_1px_var(--line)] focus-within:shadow-[inset_0_0_0_2px_var(--accent)] ${
-          open ? 'min-w-0 flex-1 px-3.5 opacity-100 md:w-[340px] md:flex-none lg:w-[420px]' : 'pointer-events-none w-0 px-0 opacity-0'}`}
+        className={`search-field flex h-10 items-center gap-2.5 overflow-hidden rounded-md bg-surface-1 text-ink-3 shadow-[inset_0_0_0_1px_var(--line)] focus-within:shadow-[inset_0_0_0_2px_var(--accent)] md:absolute md:top-1/2 md:right-11 md:z-20 md:-translate-y-1/2 md:shadow-[inset_0_0_0_1px_var(--line),var(--shadow-e2)] ${
+          open ? 'min-w-0 flex-1 px-3.5 opacity-100 md:w-[360px] md:flex-none lg:w-[440px]' : 'pointer-events-none w-0 px-0 opacity-0'}`}
       >
         <Icon name="search" size={17} className="shrink-0" />
         <span className="sr-only">Search templates</span>
@@ -69,7 +69,7 @@ export function HeaderSearch() {
         aria-controls="site-search"
         aria-label={open ? 'Close search' : 'Open search (Ctrl+K)'}
         title={open ? 'Close search' : 'Search (Ctrl+K)'}
-        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-ink hover:bg-surface-2"
+        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-ink hover:bg-surface-2"
       >
         <Icon name={open ? 'x' : 'search'} size={20} className="icon-swap" key={String(open)} />
       </button>
