@@ -1,0 +1,25 @@
+{
+  "name": "yowkly-demo-video",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Yowkly 30-second product demo, built with Remotion (1920x1080, 30fps).",
+  "type": "module",
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "render": "remotion render src/index.ts YowklyDemo out/yowkly-demo.mp4",
+    "render:prores": "remotion render src/index.ts YowklyDemo out/yowkly-demo.mov --codec=prores --prores-profile=4444",
+    "still": "remotion still src/index.ts YowklyDemo out/poster.png --frame=880",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.533",
+    "@remotion/google-fonts": "4.0.533",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "remotion": "4.0.533"
+  },
+  "devDependencies": {
+    "@types/react": "^19",
+    "typescript": "^5"
+  }
+}
